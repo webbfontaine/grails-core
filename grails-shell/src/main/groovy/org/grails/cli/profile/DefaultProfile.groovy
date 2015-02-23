@@ -128,14 +128,25 @@ class DefaultProfile implements Profile {
                 }
             }
             CommandRegistry.findCommands(this).each(registerCommand)
-            if(parentProfiles) {
+
+            def parents = parentProfiles
+            if(parents) {
                 excludes = (List)configuration.navigate("command", "excludes") ?: []
-                for(parent in parentProfiles) {
-                    parent.getCommands(context).each(registerCommand)
-                }
+                registerParentCommands(parents, registerCommand)
             }
         }
         return commandsByName.values()
+    }
+
+    protected void registerParentCommands(Iterable<Profile> parents, Closure<DefaultProfile> registerCommand) {
+        for (parent in parents) {
+            CommandRegistry.findCommands(parent, true).each registerCommand
+
+            def extended = parent.extends
+            if(extended) {
+                registerParentCommands extended, registerCommand
+            }
+        }
     }
 
     @Override
@@ -152,7 +163,15 @@ class DefaultProfile implements Profile {
         def commandName = commandLine.commandName
         def cmd = commandsByName[commandName]
         if(cmd) {
-            return cmd.handle(context)
+            def requiredArguments = cmd?.description?.arguments
+            int requiredArgumentCount = requiredArguments?.findAll() { CommandArgument ca -> ca.required }?.size() ?: 0
+            if(commandLine.remainingArgs.size() < requiredArgumentCount) {
+                context.console.error "Command [$commandName] missing required arguments: ${requiredArguments*.name}. Type 'grails help $commandName' for more info."
+                return false
+            }
+            else {
+                return cmd.handle(context)
+            }
         }
         else {
             // Apply command name expansion (rA for run-app, tA for test-app etc.)

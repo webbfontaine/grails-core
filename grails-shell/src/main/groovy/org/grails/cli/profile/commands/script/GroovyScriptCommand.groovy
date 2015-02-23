@@ -30,6 +30,7 @@ import org.grails.cli.profile.ExecutionContext
 import org.grails.cli.profile.Profile
 import org.grails.cli.profile.ProfileCommand
 import org.grails.cli.profile.codegen.ModelBuilder
+import org.grails.cli.profile.commands.events.CommandEvents
 import org.grails.cli.profile.commands.io.FileSystemInteraction
 import org.grails.cli.profile.commands.io.FileSystemInteractionImpl
 import org.grails.cli.profile.commands.templates.TemplateRenderer
@@ -42,7 +43,7 @@ import org.grails.cli.profile.commands.templates.TemplateRendererImpl
  * @since 3.0
  */
 @CompileStatic
-abstract class GroovyScriptCommand extends Script implements ProfileCommand, ConsoleLogger, ModelBuilder, FileSystemInteraction, TemplateRenderer {
+abstract class GroovyScriptCommand extends Script implements ProfileCommand, ConsoleLogger, ModelBuilder, FileSystemInteraction, TemplateRenderer, CommandEvents {
 
     Profile profile
     String name = getClass().name.contains('-') ? getClass().name : GrailsNameUtils.getScriptName(getClass().name)
@@ -100,12 +101,9 @@ abstract class GroovyScriptCommand extends Script implements ProfileCommand, Con
      * @param name The name of the flag
      * @return The flag information, or null if it isn't set by the user
      */
-    CommandArgument flag(String name) {
+    def flag(String name) {
         def value = commandLine?.undeclaredOptions?.get(name)
-        if(value) {
-            return description.getFlag(name)
-        }
-        return null
+        return value ?: null
     }
 
     /**
@@ -141,7 +139,9 @@ abstract class GroovyScriptCommand extends Script implements ProfileCommand, Con
     @Override
     boolean handle(ExecutionContext executionContext) {
         setExecutionContext(executionContext)
+        notify("${name}Start", executionContext)
         def result = run()
+        notify("${name}End", executionContext)
         if(result instanceof Boolean) {
             return ((Boolean)result)
         }
