@@ -17,30 +17,23 @@ package org.grails.plugins;
 
 import grails.config.Config;
 import grails.core.GrailsApplication;
+import grails.io.IOUtils;
 import grails.plugins.GrailsPlugin;
 import grails.plugins.GrailsPluginManager;
 import grails.util.GrailsNameUtils;
 import groovy.lang.GroovyObjectSupport;
-import org.grails.config.CompositeConfig;
-import org.grails.config.PropertySourcesConfig;
 import org.grails.config.yaml.YamlPropertySourceLoader;
 import org.grails.core.AbstractGrailsClass;
 import org.grails.core.legacy.LegacyGrailsApplication;
 import org.grails.plugins.support.WatchPattern;
 import org.springframework.beans.BeansException;
 import org.springframework.context.ApplicationContext;
-import org.springframework.core.env.MutablePropertySources;
 import org.springframework.core.env.PropertySource;
-import org.springframework.core.env.PropertySources;
-import org.springframework.core.io.ClassPathResource;
-import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
 import org.springframework.util.Assert;
 
-import java.io.File;
 import java.io.IOException;
-import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.Collections;
 import java.util.HashMap;
@@ -54,7 +47,8 @@ import java.util.Map;
  */
 public abstract class AbstractGrailsPlugin extends GroovyObjectSupport implements GrailsPlugin {
 
-    public static final String PLUGIN_YML_PATH = "/plugin.yml";
+    public static final String PLUGIN_YML = "plugin.yml";
+    public static final String PLUGIN_YML_PATH = "/" + PLUGIN_YML;
     private static Resource basePluginResource = null;
     protected PropertySource<?> propertySource;
     protected org.codehaus.groovy.grails.commons.GrailsApplication application;
@@ -117,24 +111,11 @@ public abstract class AbstractGrailsPlugin extends GroovyObjectSupport implement
     }
 
     protected Resource readPluginConfiguration(Class<?> pluginClass) {
-        String path = pluginClass.getResource("").toString();
-        int i = path.indexOf("jar!");
-        if(i > -1) {
-            path = path.substring(0, i + 4);
-            try {
-                return new UrlResource( new URL(path + PLUGIN_YML_PATH) );
-            } catch (MalformedURLException e) {
-                // ignore
-            }
-        }
-        else {
-            // if the plugin is not inside a JAR file then we could be in a plugin project so scan for the
-            // plugin.yml in the compiled classes directory
-            URL resource = getClass().getResource(PLUGIN_YML_PATH);
-            if(resource != null) {
-                isBase = true;
-                return new UrlResource(resource);
-            }
+        final URL urlToPluginYml = IOUtils.findResourceRelativeToClass(pluginClass, PLUGIN_YML_PATH);
+
+        Resource urlResource = urlToPluginYml != null ? new UrlResource(urlToPluginYml) : null;
+        if(urlResource != null && urlResource.exists()) {
+            return urlResource;
         }
         return null;
     }

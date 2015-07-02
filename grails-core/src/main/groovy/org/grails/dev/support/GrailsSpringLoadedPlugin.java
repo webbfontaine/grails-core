@@ -10,6 +10,7 @@ import org.springsource.loaded.ReloadEventProcessorPlugin;
 import org.springsource.loaded.agent.*;
 
 import java.beans.Introspector;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -34,6 +35,7 @@ public class GrailsSpringLoadedPlugin implements ReloadEventProcessorPlugin {
     @Override
     public void reloadEvent(String typename, Class<?> clazz, String encodedTimestamp) {
         CachedIntrospectionResults.clearClassLoader(clazz.getClassLoader());
+        org.grails.beans.support.CachedIntrospectionResults.clearClassLoader(clazz.getClassLoader());
         ClassPropertyFetcher.clearClassPropertyFetcherCache();
         Introspector.flushFromCaches(clazz);
 
@@ -42,7 +44,7 @@ public class GrailsSpringLoadedPlugin implements ReloadEventProcessorPlugin {
 
     private static boolean unregistered = false;
     public static void unregister() {
-        List<Plugin> globalPlugins = SpringLoadedPreProcessor.getGlobalPlugins();
+        List<Plugin> globalPlugins = new ArrayList<Plugin>(SpringLoadedPreProcessor.getGlobalPlugins());
         for (Plugin globalPlugin : globalPlugins) {
             Plugins.unregisterGlobalPlugin(globalPlugin);
         }

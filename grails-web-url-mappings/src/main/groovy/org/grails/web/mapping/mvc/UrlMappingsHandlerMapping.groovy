@@ -48,7 +48,7 @@ import javax.servlet.http.HttpServletResponse
 @CompileStatic
 class UrlMappingsHandlerMapping extends AbstractHandlerMapping {
 
-    static final String MATCHED_REQUEST = "org.grails.url.match.info"
+    public static final String MATCHED_REQUEST = "org.grails.url.match.info"
 
     protected UrlMappingsHolder urlMappingsHolder
     protected UrlPathHelper urlHelper = new UrlPathHelper();
@@ -82,10 +82,13 @@ class UrlMappingsHandlerMapping extends AbstractHandlerMapping {
     protected HandlerExecutionChain getHandlerExecutionChain(Object handler, HttpServletRequest request) {
         HandlerExecutionChain chain = (handler instanceof HandlerExecutionChain ?
                 (HandlerExecutionChain) handler : new HandlerExecutionChain(handler));
-        chain.addInterceptors getAdaptedInterceptors()
+
+        // WebRequestInterceptor need to come first, as these include things like Hibernate OSIV
         if(webRequestHandlerInterceptors) {
             chain.addInterceptors webRequestHandlerInterceptors
         }
+
+        chain.addInterceptors getAdaptedInterceptors()
 
         String lookupPath = this.urlPathHelper.getLookupPathForRequest(request)
         for (MappedInterceptor mappedInterceptor in getMappedInterceptors()) {
@@ -176,9 +179,7 @@ class UrlMappingsHandlerMapping extends AbstractHandlerMapping {
 
         @Override
         void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) throws Exception {
-            if(ex != null) {
-                request.removeAttribute(MATCHED_REQUEST)
-            }
+            request.removeAttribute(MATCHED_REQUEST)
         }
     }
 }

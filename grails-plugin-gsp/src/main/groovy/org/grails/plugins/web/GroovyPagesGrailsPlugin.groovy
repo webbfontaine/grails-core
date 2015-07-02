@@ -22,6 +22,7 @@ import grails.plugins.Plugin
 import grails.util.BuildSettings
 import grails.util.Environment
 import grails.util.GrailsUtil
+import grails.util.Metadata
 import grails.web.pages.GroovyPagesUriService
 import groovy.transform.CompileStatic
 import groovy.util.logging.Commons
@@ -36,7 +37,6 @@ import org.grails.spring.RuntimeSpringConfiguration
 import org.grails.taglib.TagLibraryLookup
 import org.grails.taglib.TagLibraryMetaUtils
 import org.grails.web.errors.ErrorsViewStackTracePrinter
-import org.grails.web.filters.JavascriptLibraryHandlerInterceptor
 import org.grails.web.gsp.GroovyPagesTemplateRenderer
 import org.grails.web.gsp.io.CachingGrailsConventionGroovyPageLocator
 import org.grails.web.pages.DefaultGroovyPagesUriService
@@ -47,6 +47,8 @@ import org.grails.web.sitemesh.GroovyPageLayoutFinder
 import org.grails.web.util.GrailsApplicationAttributes
 import org.springframework.beans.factory.config.PropertiesFactoryBean
 import org.springframework.boot.context.embedded.ServletRegistrationBean
+import org.springframework.context.ApplicationContext
+import org.springframework.core.io.Resource
 import org.springframework.util.ClassUtils
 import org.springframework.web.servlet.view.InternalResourceViewResolver
 /**
@@ -101,13 +103,15 @@ class GroovyPagesGrailsPlugin extends Plugin {
     Closure doWithSpring() {{->
         def application = grailsApplication
         Config config = application.config
-        boolean developmentMode = !application.warDeployed
+        boolean developmentMode = isDevelopmentMode()
         Environment env = Environment.current
 
         boolean enableReload = env.isReloadEnabled() ||
                                 config.getProperty(GroovyPagesTemplateEngine.CONFIG_PROPERTY_GSP_ENABLE_RELOAD, Boolean, false) ||
                                     (developmentMode && env == Environment.DEVELOPMENT)
-        boolean warDeployedWithReload = application.warDeployed && enableReload
+
+        boolean warDeployed = application.warDeployed
+        boolean warDeployedWithReload = warDeployed && enableReload
 
         long gspCacheTimeout = config.getProperty(GSP_RELOAD_INTERVAL, Long,  (developmentMode && env == Environment.DEVELOPMENT) ? 0L : 5000L)
         boolean enableCacheResources = !config.getProperty(GroovyPagesTemplateEngine.CONFIG_PROPERTY_DISABLE_CACHING_RESOURCES, Boolean, false)
@@ -159,16 +163,29 @@ class GroovyPagesGrailsPlugin extends Plugin {
             }
         }
 
-        def deployed = application.warDeployed
+        def deployed = !Metadata.getCurrent().isDevelopmentEnvironmentAvailable()
         groovyPageLocator(CachingGrailsConventionGroovyPageLocator) { bean ->
             bean.lazyInit = true
             if (customResourceLoader) {
                 resourceLoader = groovyPageResourceLoader
             }
             if (deployed) {
+                def context = grailsApplication?.mainContext
+                def allViewsProperties = context?.getResources("classpath*:gsp/views.properties")
+                allViewsProperties = allViewsProperties?.findAll { Resource r ->
+                    def p = r.URL.path
+                    if(warDeployed && p.contains('/WEB-INF/classes')) {
+                        return true
+                    }
+                    else if(!warDeployed && !p.contains("!/lib")) {
+                        return true
+                    }
+
+                    return false
+                }
                 precompiledGspMap = { PropertiesFactoryBean pfb ->
                     ignoreResourceNotFound = true
-                    location = "classpath:gsp/views.properties"
+                    locations = allViewsProperties ? allViewsProperties as Resource[] : 'classpath:gsp/views.properties'
                 }
             }
             if (enableReload) {
@@ -261,7 +278,6 @@ class GroovyPagesGrailsPlugin extends Plugin {
         }
 
         errorsViewStackTracePrinter(ErrorsViewStackTracePrinter, ref('grailsResourceLocator'))
-        javascriptLibraryHandlerInterceptor(JavascriptLibraryHandlerInterceptor, application)
         filteringCodecsByContentTypeSettings(FilteringCodecsByContentTypeSettings, application)
 
         groovyPagesServlet(ServletRegistrationBean, new GroovyPagesServlet(), "*.gsp") {
@@ -270,6 +286,10 @@ class GroovyPagesGrailsPlugin extends Plugin {
             }
         }
     }}
+
+    protected boolean isDevelopmentMode() {
+        Metadata.getCurrent().isDevelopmentEnvironmentAvailable()
+    }
 
     static String transformToValidLocation(String location) {
         if (location == '.') return location

@@ -307,6 +307,7 @@ public class RegexUrlMapping extends AbstractUrlMapping {
             Matcher m = OPTIONAL_EXTENSION_WILDCARD_PATTERN.matcher(token);
             if (m.find()) {
 
+                boolean tokenSet = false;
                 if (token.startsWith(CAPTURED_WILDCARD)) {
                     ConstrainedProperty prop = constraints[paramIndex++];
                     String propName = prop.getPropertyName();
@@ -316,12 +317,19 @@ public class RegexUrlMapping extends AbstractUrlMapping {
 
                     if (value != null) {
                         token = token.replaceFirst(DOUBLE_WILDCARD_PATTERN.pattern(), value.toString());
+                        tokenSet = true;
                     }
-                    else if (prop.isNullable()) {
-                        break;
+                    else {
+                        token = token.replaceFirst(DOUBLE_WILDCARD_PATTERN.pattern(), "");
                     }
                 }
-                uri.append(SLASH);
+                else {
+                    tokenSet = true;
+                }
+                if(tokenSet) {
+
+                    uri.append(SLASH);
+                }
                 ConstrainedProperty prop = constraints[paramIndex++];
                 String propName = prop.getPropertyName();
                 Object value = paramValues.get(propName);
@@ -723,22 +731,27 @@ public class RegexUrlMapping extends AbstractUrlMapping {
 
         UrlMapping other = (UrlMapping) o;
 
-        final int otherDoubleWildcardCount = getDoubleWildcardCount(other);
-        final int thisDoubleWildcardCount = getDoubleWildcardCount(this);
-        final int doubleWildcardDiff = otherDoubleWildcardCount - thisDoubleWildcardCount;
-        if (doubleWildcardDiff != 0) return doubleWildcardDiff;
-
-        final int otherSingleWildcardCount = getSingleWildcardCount(other);
-        final int thisSingleWildcardCount = getSingleWildcardCount(this);
-        final int singleWildcardDiff = otherSingleWildcardCount - thisSingleWildcardCount;
-        if (singleWildcardDiff != 0) return singleWildcardDiff;
-
         final int thisStaticTokenCount = getStaticTokenCount(this);
         final int otherStaticTokenCount = getStaticTokenCount(other);
-        if (otherStaticTokenCount==0 && thisStaticTokenCount>0) {
+        final int otherSingleWildcardCount = getSingleWildcardCount(other);
+        final int thisSingleWildcardCount = getSingleWildcardCount(this);
+        final int otherDoubleWildcardCount = getDoubleWildcardCount(other);
+        final int thisDoubleWildcardCount = getDoubleWildcardCount(this);
+        final boolean hasWildCards = thisDoubleWildcardCount > 0 || thisSingleWildcardCount > 0;
+        final boolean otherHasWildCards = otherDoubleWildcardCount > 0 || otherSingleWildcardCount > 0;
+
+        // Always prioritise the / root mapping
+        if(thisStaticTokenCount == 0 && thisSingleWildcardCount == 0 && thisDoubleWildcardCount == 0) {
             return 1;
         }
-        if (thisStaticTokenCount==0 && otherStaticTokenCount>0) {
+        if(otherStaticTokenCount == 0 && otherSingleWildcardCount == 0 && otherDoubleWildcardCount == 0) {
+            return -1;
+        }
+
+        if (otherStaticTokenCount ==0 && thisStaticTokenCount > 0) {
+            return 1;
+        }
+        if (thisStaticTokenCount ==0 && otherStaticTokenCount>0) {
             return -1;
         }
 
@@ -752,12 +765,24 @@ public class RegexUrlMapping extends AbstractUrlMapping {
         }
 
         final int staticDiff = thisStaticTokenCount - otherStaticTokenCount;
-        if (staticDiff != 0) return staticDiff;
+        if (staticDiff < 0 && !otherHasWildCards) {
+            return staticDiff;
+        }
+        else if(staticDiff > 0 && !hasWildCards) {
+            return staticDiff;
+        }
         String[] thisTokens = getUrlData().getTokens();
         String[] otherTokens = other.getUrlData().getTokens();
-        for (int i = 0; i < thisTokens.length; i++) {
-            boolean thisTokenIsWildcard = isSingleWildcard(thisTokens[i]);
-            boolean otherTokenIsWildcard = isSingleWildcard(otherTokens[i]);
+        final int thisTokensLength = thisTokens.length;
+        final int otherTokensLength = otherTokens.length;
+
+        int greaterLength = thisTokensLength > otherTokensLength ? thisTokensLength : otherTokensLength;
+        for (int i = 0; i < greaterLength; i++) {
+            final boolean thisHasMoreTokens = i < thisTokensLength;
+            final boolean otherHasMoreTokens = i < otherTokensLength;
+
+            boolean thisTokenIsWildcard = !thisHasMoreTokens || isSingleWildcard(thisTokens[i]);
+            boolean otherTokenIsWildcard = !otherHasMoreTokens || isSingleWildcard(otherTokens[i]);
             if (thisTokenIsWildcard && !otherTokenIsWildcard) {
                 return -1;
             }
@@ -766,8 +791,19 @@ public class RegexUrlMapping extends AbstractUrlMapping {
             }
         }
 
+        final int doubleWildcardDiff = otherDoubleWildcardCount - thisDoubleWildcardCount;
+        if (doubleWildcardDiff != 0) return doubleWildcardDiff;
+
+        final int singleWildcardDiff = otherSingleWildcardCount - thisSingleWildcardCount;
+        if (singleWildcardDiff != 0) return singleWildcardDiff;
+
         int constraintDiff = getAppliedConstraintsCount(this) - getAppliedConstraintsCount(other);
         if (constraintDiff != 0) return constraintDiff;
+
+        int allDiff = (thisStaticTokenCount - otherStaticTokenCount) + (thisSingleWildcardCount - otherSingleWildcardCount) + (thisDoubleWildcardCount - otherDoubleWildcardCount);
+        if(allDiff != 0) {
+            return allDiff;
+        }
 
         String thisVersion = getVersion();
         String thatVersion = other.getVersion();

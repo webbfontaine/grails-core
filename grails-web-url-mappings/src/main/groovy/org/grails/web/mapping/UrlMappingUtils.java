@@ -21,6 +21,7 @@ import grails.web.UrlConverter;
 import grails.web.mapping.UrlMappingInfo;
 import grails.web.mapping.UrlMappingsHolder;
 import groovy.lang.Binding;
+import org.grails.web.mapping.mvc.UrlMappingsHandlerMapping;
 import org.grails.web.util.GrailsApplicationAttributes;
 import org.grails.web.servlet.WrappedResponseHolder;
 import org.grails.web.servlet.mvc.GrailsWebRequest;
@@ -32,6 +33,7 @@ import org.springframework.beans.factory.NoSuchBeanDefinitionException;
 import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.context.support.WebApplicationContextUtils;
+import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.servlet.ModelAndView;
 import org.springframework.web.servlet.View;
 import org.springframework.web.servlet.ViewResolver;
@@ -108,13 +110,11 @@ public class UrlMappingUtils {
             }
         }
         else {
-            forwardUrl.append(WebUtils.GRAILS_SERVLET_PATH);
             forwardUrl.append(WebUtils.SLASH).append(info.getControllerName());
 
             if (!GrailsStringUtils.isBlank(info.getActionName())) {
                 forwardUrl.append(WebUtils.SLASH).append(info.getActionName());
             }
-            forwardUrl.append(WebUtils.GRAILS_DISPATCH_EXTENSION);
         }
 
         final Map parameters = info.getParameters();
@@ -177,6 +177,8 @@ public class UrlMappingUtils {
         webRequest.removeAttribute(GrailsApplicationAttributes.MODEL_AND_VIEW, 0);
         info.configure(webRequest);
         webRequest.removeAttribute(GrailsApplicationAttributes.GRAILS_CONTROLLER_CLASS_AVAILABLE, WebRequest.SCOPE_REQUEST);
+        webRequest.removeAttribute(UrlMappingsHandlerMapping.MATCHED_REQUEST, WebRequest.SCOPE_REQUEST);
+        webRequest.removeAttribute("grailsWebRequestFilter" + OncePerRequestFilter.ALREADY_FILTERED_SUFFIX, WebRequest.SCOPE_REQUEST);
         dispatcher.forward(request, response);
         return forwardUrl;
     }
@@ -284,7 +286,18 @@ public class UrlMappingUtils {
 
         Map toRestore = WebUtils.exposeRequestAttributesAndReturnOldValues(request, model);
 
+        final GrailsWebRequest webRequest = GrailsWebRequest.lookup(request);
+
+
+        final Object previousControllerClass = webRequest.getAttribute(GrailsApplicationAttributes.GRAILS_CONTROLLER_CLASS_AVAILABLE, WebRequest.SCOPE_REQUEST);
+        final Object previousMatchedRequest = webRequest.getAttribute(UrlMappingsHandlerMapping.MATCHED_REQUEST, WebRequest.SCOPE_REQUEST);
+
+
+
         try {
+            webRequest.removeAttribute(GrailsApplicationAttributes.GRAILS_CONTROLLER_CLASS_AVAILABLE, WebRequest.SCOPE_REQUEST);
+            webRequest.removeAttribute(UrlMappingsHandlerMapping.MATCHED_REQUEST, WebRequest.SCOPE_REQUEST);
+            webRequest.removeAttribute("grailsWebRequestFilter" + OncePerRequestFilter.ALREADY_FILTERED_SUFFIX, WebRequest.SCOPE_REQUEST);
             final IncludeResponseWrapper responseWrapper = new IncludeResponseWrapper(response);
             try {
                 WrappedResponseHolder.setWrappedResponse(responseWrapper);
@@ -295,6 +308,9 @@ public class UrlMappingUtils {
                 return new IncludedContent(responseWrapper.getContentType(), responseWrapper.getContent());
             }
             finally {
+                webRequest.setAttribute(GrailsApplicationAttributes.GRAILS_CONTROLLER_CLASS_AVAILABLE, previousControllerClass,WebRequest.SCOPE_REQUEST);
+                webRequest.setAttribute(UrlMappingsHandlerMapping.MATCHED_REQUEST,previousMatchedRequest, WebRequest.SCOPE_REQUEST);
+
                 WrappedResponseHolder.setWrappedResponse(wrapped);
             }
         }

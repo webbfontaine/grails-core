@@ -33,6 +33,7 @@ import grails.web.servlet.mvc.GrailsHttpSession;
 import grails.web.servlet.mvc.GrailsParameterMap;
 import grails.core.GrailsApplication;
 import grails.core.GrailsControllerClass;
+import org.grails.core.artefact.ControllerArtefactHandler;
 import org.grails.core.io.support.GrailsFactoriesLoader;
 import org.grails.encoder.CodecLookupHelper;
 import org.grails.encoder.DefaultEncodingStateRegistry;
@@ -66,6 +67,10 @@ import org.springframework.web.util.UrlPathHelper;
  * @since 3.0
  */
 public class GrailsWebRequest extends DispatcherServletWebRequest  {
+
+    private static final String FORWARD_CALLED = "org.codehaus.groovy.grails.FORWARD_CALLED";
+    private static final String REDIRECT_CALLED = GrailsApplicationAttributes.REDIRECT_ISSUED;
+
     private static final Class<? extends GrailsApplicationAttributes> grailsApplicationAttributesClass = GrailsFactoriesLoader.loadFactoryClasses(GrailsApplicationAttributes.class, GrailsWebRequest.class.getClassLoader()).get(0);
     private static final Constructor<? extends GrailsApplicationAttributes> grailsApplicationAttributesConstructor = ClassUtils.getConstructorIfAvailable(grailsApplicationAttributesClass, ServletContext.class);
     private GrailsApplicationAttributes attributes;
@@ -83,6 +88,7 @@ public class GrailsWebRequest extends DispatcherServletWebRequest  {
     private HttpServletResponse wrappedResponse;
 
     private EncodingStateRegistry encodingStateRegistry;
+    private HttpServletRequest multipartRequest;
 
     public GrailsWebRequest(HttpServletRequest request, HttpServletResponse response, GrailsApplicationAttributes attributes) {
         super(request, response);
@@ -106,6 +112,16 @@ public class GrailsWebRequest extends DispatcherServletWebRequest  {
     public GrailsWebRequest(HttpServletRequest request, HttpServletResponse response, ServletContext servletContext, ApplicationContext applicationContext) {
         this(request, response, servletContext);
         this.applicationContext = applicationContext;
+    }
+
+
+    /**
+     * Holds a reference to the {@link org.springframework.web.multipart.MultipartRequest}
+     *
+     * @param multipartRequest The multipart request
+     */
+    public void setMultipartRequest(HttpServletRequest multipartRequest) {
+        this.multipartRequest = multipartRequest;
     }
 
     private void inheritEncodingStateRegistry() {
@@ -197,7 +213,12 @@ public class GrailsWebRequest extends DispatcherServletWebRequest  {
      * @return The currently executing request
      */
     public HttpServletRequest getCurrentRequest() {
-        return getRequest();
+        if(multipartRequest != null) {
+            return multipartRequest;
+        }
+        else {
+            return getRequest();
+        }
     }
 
     public HttpServletResponse getCurrentResponse() {
@@ -305,7 +326,20 @@ public class GrailsWebRequest extends DispatcherServletWebRequest  {
      * @return the controllerClass
      */
     public GrailsControllerClass getControllerClass() {
-        return (GrailsControllerClass)getCurrentRequest().getAttribute(GrailsApplicationAttributes.GRAILS_CONTROLLER_CLASS);
+        HttpServletRequest currentRequest = getCurrentRequest();
+        GrailsControllerClass controllerClass = (GrailsControllerClass) currentRequest.getAttribute(GrailsApplicationAttributes.GRAILS_CONTROLLER_CLASS);
+        if(controllerClass == null) {
+            Object controllerNameObject = currentRequest.getAttribute(GrailsApplicationAttributes.CONTROLLER_NAME_ATTRIBUTE);
+            if(controllerNameObject != null) {
+                controllerClass = (GrailsControllerClass)getAttributes()
+                                                            .getGrailsApplication()
+                                                            .getArtefactByLogicalPropertyName(ControllerArtefactHandler.TYPE, controllerNameObject.toString());
+                if(controllerClass != null) {
+                    currentRequest.setAttribute(GrailsApplicationAttributes.GRAILS_CONTROLLER_CLASS, controllerClass);
+                }
+            }
+        }
+        return controllerClass;
     }
 
     /**
@@ -323,7 +357,11 @@ public class GrailsWebRequest extends DispatcherServletWebRequest  {
      * @return true if the view for this GrailsWebRequest should be rendered
      */
     public boolean isRenderView() {
-        return renderView;
+        final HttpServletRequest currentRequest = getCurrentRequest();
+        return renderView &&
+                !getCurrentResponse().isCommitted() &&
+                currentRequest.getAttribute(REDIRECT_CALLED) == null &&
+                currentRequest.getAttribute(FORWARD_CALLED) == null;
     }
 
     public String getId() {

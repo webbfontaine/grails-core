@@ -17,8 +17,11 @@ import org.grails.test.context.junit4.GrailsJunit4ClassRunner
 import org.grails.test.context.junit4.GrailsTestConfiguration
 import org.junit.runner.RunWith
 import org.springframework.beans.factory.annotation.Value
+import org.springframework.beans.factory.config.AutowireCapableBeanFactory
 import org.springframework.boot.test.IntegrationTest
 import org.springframework.boot.test.WebIntegrationTest
+import org.springframework.context.ApplicationContext
+import org.springframework.context.ApplicationContextAware
 import org.springframework.test.context.ContextConfiguration
 import org.springframework.test.context.web.WebAppConfiguration
 import org.springframework.util.ClassUtils
@@ -79,7 +82,7 @@ class IntegrationTestMixinTransformation implements ASTTransformation {
                 GrailsASTUtils.error(source, applicationClassExpression, "Invalid applicationClass attribute value [${applicationClassNode.getName()}].  The applicationClass attribute must specify a class which extends grails.boot.config.GrailsAutoConfiguration.", true)
             }
         } else {
-            String mainClass = MainClassFinder.searchMainClass()
+            String mainClass = MainClassFinder.searchMainClass(source.source.URI)
             if(mainClass) {
                 applicationClassNode = ClassHelper.make(mainClass)
             }
@@ -88,42 +91,65 @@ class IntegrationTestMixinTransformation implements ASTTransformation {
         if(applicationClassNode) {
             ClassNode classNode = (ClassNode) parent
 
-            if(TestMixinTransformation.isSpockTest(classNode)) {
-                // first add context configuration
-                // Example: @ContextConfiguration(loader = GrailsApplicationContextLoader, classes = Application)
-                def contextConfigAnn = new AnnotationNode(CONTEXT_CONFIG_ANNOTATION)
-                contextConfigAnn.addMember("loader", new ClassExpression(GRAILS_APPLICATION_CONTEXT_LOADER))
-                contextConfigAnn.addMember("classes", new ClassExpression(applicationClassNode))
-                classNode.addAnnotation(contextConfigAnn)
-
-                enhanceGebSpecWithPort(classNode)
-
-            }
-            else {
-                // Must be a JUnit 4 test so add JUnit spring annotations
-                // @RunWith(SpringJUnit4ClassRunner)
-                def runWithAnnotation = new AnnotationNode(RUN_WITH_ANNOTATION_NODE)
-                runWithAnnotation.addMember("value", new ClassExpression(SPRING_JUNIT4_CLASS_RUNNER))
-                classNode.addAnnotation(runWithAnnotation)
-
-                // @SpringApplicationConfiguration(classes = Application)
-                def contextConfigAnn = new AnnotationNode(SPRING_APPLICATION_CONFIGURATION_CLASS_NODE)
-                contextConfigAnn.addMember("classes", new ClassExpression(applicationClassNode))
-                classNode.addAnnotation(contextConfigAnn)
-            }
-
-            // now add integration test annotations
-            // @WebAppConfiguration
-            // @IntegrationTest
-            if(ClassUtils.isPresent("javax.servlet.ServletContext", Thread.currentThread().contextClassLoader)) {
-                classNode.addAnnotation(new AnnotationNode(WEB_INTEGRATION_TEST_CLASS_NODE))
-            }
-            else {
-                classNode.addAnnotation(new AnnotationNode(INTEGRATION_TEST_CLASS_NODE))
-            }
+            weaveIntegrationTestMixin(classNode, applicationClassNode)
 
         }
 
+    }
+
+    public void weaveIntegrationTestMixin(ClassNode classNode, ClassNode applicationClassNode) {
+        if(applicationClassNode == null) return
+
+
+        enableAutowireByName(classNode)
+
+        if (TestMixinTransformation.isSpockTest(classNode)) {
+            // first add context configuration
+            // Example: @ContextConfiguration(loader = GrailsApplicationContextLoader, classes = Application)
+            def contextConfigAnn = new AnnotationNode(CONTEXT_CONFIG_ANNOTATION)
+            contextConfigAnn.addMember("loader", new ClassExpression(GRAILS_APPLICATION_CONTEXT_LOADER))
+            contextConfigAnn.addMember("classes", new ClassExpression(applicationClassNode))
+            classNode.addAnnotation(contextConfigAnn)
+
+            enhanceGebSpecWithPort(classNode)
+
+        } else {
+            // Must be a JUnit 4 test so add JUnit spring annotations
+            // @RunWith(SpringJUnit4ClassRunner)
+            def runWithAnnotation = new AnnotationNode(RUN_WITH_ANNOTATION_NODE)
+            runWithAnnotation.addMember("value", new ClassExpression(SPRING_JUNIT4_CLASS_RUNNER))
+            classNode.addAnnotation(runWithAnnotation)
+
+            // @SpringApplicationConfiguration(classes = Application)
+            def contextConfigAnn = new AnnotationNode(SPRING_APPLICATION_CONFIGURATION_CLASS_NODE)
+            contextConfigAnn.addMember("classes", new ClassExpression(applicationClassNode))
+            classNode.addAnnotation(contextConfigAnn)
+        }
+
+        // now add integration test annotations
+        // @WebAppConfiguration
+        // @IntegrationTest
+        if (ClassUtils.isPresent("javax.servlet.ServletContext", Thread.currentThread().contextClassLoader)) {
+            classNode.addAnnotation(new AnnotationNode(WEB_INTEGRATION_TEST_CLASS_NODE))
+        } else {
+            classNode.addAnnotation(new AnnotationNode(INTEGRATION_TEST_CLASS_NODE))
+        }
+    }
+
+    protected void enableAutowireByName(ClassNode classNode) {
+        classNode.addInterface(ClassHelper.make(ApplicationContextAware))
+
+        def body = new BlockStatement()
+
+        def ctxClass = ClassHelper.make(ApplicationContext)
+        def p = new Parameter(ctxClass, "ctx")
+
+        def getBeanFactoryMethodCall = new MethodCallExpression(new VariableExpression(p), "getAutowireCapableBeanFactory", GrailsASTUtils.ZERO_ARGUMENTS)
+
+        def args = new ArgumentListExpression(new VariableExpression("this"), new ConstantExpression(AutowireCapableBeanFactory.AUTOWIRE_BY_NAME), new ConstantExpression(Boolean.FALSE))
+        def autoMethodCall = new MethodCallExpression(getBeanFactoryMethodCall, "autowireBeanProperties", args)
+        body.addStatement(new ExpressionStatement(autoMethodCall))
+        classNode.addMethod("setApplicationContext", Modifier.PUBLIC, ClassHelper.VOID_TYPE, [p] as Parameter[], null, body)
     }
 
     protected void enhanceGebSpecWithPort(ClassNode classNode) {

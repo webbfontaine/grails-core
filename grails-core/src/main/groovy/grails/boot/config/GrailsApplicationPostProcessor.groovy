@@ -1,5 +1,6 @@
 package grails.boot.config
 
+import grails.boot.GrailsApp
 import grails.config.Settings
 import grails.core.DefaultGrailsApplication
 import grails.core.GrailsApplication
@@ -15,6 +16,7 @@ import groovy.util.logging.Commons
 import org.grails.config.NavigableMap
 import org.grails.config.PrefixedMapPropertySource
 import org.grails.config.PropertySourcesConfig
+import org.grails.core.exceptions.GrailsConfigurationException
 import org.grails.core.lifecycle.ShutdownOperations
 import org.grails.dev.support.GrailsSpringLoadedPlugin
 import org.grails.spring.DefaultRuntimeSpringConfiguration
@@ -77,15 +79,20 @@ class GrailsApplicationPostProcessor implements BeanDefinitionRegistryPostProces
         }
     }
 
-    protected void initializeGrailsApplication(ApplicationContext applicationContext) {
+    protected final void initializeGrailsApplication(ApplicationContext applicationContext) {
         this.applicationContext = applicationContext
         grailsApplication.applicationContext = applicationContext
         grailsApplication.mainContext = applicationContext
+        customizePluginManager(pluginManager)
         pluginManager.loadPlugins()
         pluginManager.applicationContext = applicationContext
         loadApplicationConfig()
         customizeGrailsApplication(grailsApplication)
         performGrailsInitializationSequence()
+    }
+
+    protected void customizePluginManager(GrailsPluginManager grailsApplication) {
+
     }
 
     protected void customizeGrailsApplication(GrailsApplication grailsApplication) {
@@ -131,21 +138,36 @@ class GrailsApplicationPostProcessor implements BeanDefinitionRegistryPostProces
     void postProcessBeanDefinitionRegistry(BeanDefinitionRegistry registry) throws BeansException {
         def springConfig = new DefaultRuntimeSpringConfiguration()
 
-        Holders.setGrailsApplication(grailsApplication)
+
+        def application = grailsApplication
+        Holders.setGrailsApplication(application)
 
         // first register plugin beans
         pluginManager.doRuntimeConfiguration(springConfig)
 
         if(loadExternalBeans) {
             // now allow overriding via application
-            def beanResources = grailsApplication.mainContext.getResource("classpath:spring/resources.groovy")
-            if (beanResources.exists()) {
-                def gcl = new GroovyClassLoader(grailsApplication.classLoader)
+
+            def context = application.mainContext
+            def beanResources = context.getResource(RuntimeSpringConfigUtilities.SPRING_RESOURCES_GROOVY)
+            if (beanResources?.exists()) {
+                def gcl = new GroovyClassLoader(application.classLoader)
                 try {
-                    RuntimeSpringConfigUtilities.reloadSpringResourcesConfig(springConfig, grailsApplication, gcl.parseClass(beanResources.inputStream, beanResources.filename))
+                    RuntimeSpringConfigUtilities.reloadSpringResourcesConfig(springConfig, application, gcl.parseClass(new GroovyCodeSource(beanResources.URL)))
                 } catch (Throwable e) {
                     log.error("Error loading spring/resources.groovy file: ${e.message}", e)
-                    throw e
+                    throw new GrailsConfigurationException("Error loading spring/resources.groovy file: ${e.message}", e)
+                }
+            }
+
+            beanResources = context.getResource(RuntimeSpringConfigUtilities.SPRING_RESOURCES_XML)
+            if (beanResources?.exists()) {
+                try {
+                    new BeanBuilder(null, springConfig, application.classLoader)
+                            .importBeans(beanResources)
+                } catch (Throwable e) {
+                    log.error("Error loading spring/resources.xml file: ${e.message}", e)
+                    throw new GrailsConfigurationException("Error loading spring/resources.xml file: ${e.message}", e)
                 }
             }
         }
@@ -153,7 +175,7 @@ class GrailsApplicationPostProcessor implements BeanDefinitionRegistryPostProces
         if(lifeCycle) {
             def withSpring = lifeCycle.doWithSpring()
             if(withSpring) {
-                def bb = new BeanBuilder(null, springConfig, grailsApplication.classLoader)
+                def bb = new BeanBuilder(null, springConfig, application.classLoader)
                 bb.beans withSpring
             }
         }
@@ -217,8 +239,14 @@ class GrailsApplicationPostProcessor implements BeanDefinitionRegistryPostProces
             ShutdownOperations.runOperations()
             Holders.clear()
             if(reloadingEnabled) {
-                GrailsSpringLoadedPlugin.unregister()
+                try {
+                    GrailsSpringLoadedPlugin.unregister()
+                } catch (Throwable e) {
+                    // ignore
+                }
             }
+
+            GrailsApp.setDevelopmentModeActive(false)
         }
     }
 

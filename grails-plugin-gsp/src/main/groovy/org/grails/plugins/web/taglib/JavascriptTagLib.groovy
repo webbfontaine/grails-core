@@ -17,58 +17,27 @@ package org.grails.plugins.web.taglib
 
 import grails.artefact.TagLibrary
 import grails.gsp.TagLib
+import grails.plugins.GrailsPluginManager
+import org.springframework.context.ApplicationContext
+import org.springframework.context.ApplicationContextAware
 
 import javax.annotation.PostConstruct
 
-import grails.plugins.GrailsPluginManager
-import org.grails.encoder.CodecLookup
-import org.grails.encoder.Encoder
-import org.grails.taglib.GrailsTagException
-import org.springframework.context.ApplicationContext
-import org.springframework.context.ApplicationContextAware
-import org.springframework.util.ClassUtils
-
 /**
- * Tags for developing javascript and ajax applications.
+ * Javascript tags.
  *
  * @author Graeme Rocher
  */
 @TagLib
 class JavascriptTagLib implements ApplicationContextAware, TagLibrary {
     ApplicationContext applicationContext
-    /**
-     * Mappings to the relevant files to be included for each library.
-     */
-    public static final String INCLUDED_LIBRARIES = "org.codehaus.grails.INCLUDED_JS_LIBRARIES"
-    static final String INCLUDED_JS = "org.codehaus.grails.INCLUDED_JS"
-    static final String CONTROLLER = "org.codehaus.groovy.grails.CONTROLLER"
-    static final LIBRARY_MAPPINGS = [:]
-    static final PROVIDER_MAPPINGS = [:]
 
     GrailsPluginManager pluginManager
-    CodecLookup codecLookup
 
-    Class<JavascriptProvider> defaultProvider
     boolean hasResourceProcessor = false
 
     static encodeAsForTags = [escapeJavascript: 'JavaScript', 
-                              javascript: [expressionCodec:"JavaScript", scriptletCodec:"JavaScript", replaceOnly:true],
-                              remoteFunction: 'raw',
-                              remoteLink: 'raw',
-                              remoteField: 'raw'
-                              ]
-
-    JavascriptTagLib() {
-        def cl = Thread.currentThread().contextClassLoader
-        def hasJquery = ClassUtils.isPresent("org.codehaus.groovy.grails.plugins.jquery.JQueryProvider", cl)
-        if (hasJquery) {
-            try {
-                defaultProvider = cl.loadClass("org.codehaus.groovy.grails.plugins.jquery.JQueryProvider")
-            } catch (e) {
-                // ignore
-            }
-        }
-    }
+                              javascript: [expressionCodec:"JavaScript", scriptletCodec:"JavaScript", replaceOnly:true]]
 
     @PostConstruct
     private void initHasResourceProcessor() {
@@ -98,40 +67,9 @@ class JavascriptTagLib implements ApplicationContextAware, TagLibrary {
      * @attr base specifies the full base url to prepend to the library name
      */
     Closure javascript = { attrs, body ->
-
-        setUpRequestAttributes()
-
         if (attrs.src) {
             javascriptInclude(attrs)
-        }
-        else if (attrs.library) {
-            if (hasResourceProcessor) {
-                out << r.require(module:attrs.library)
-                includedLibrary(attrs.library)
-            } else {
-                if (LIBRARY_MAPPINGS.containsKey(attrs.library)) {
-                    LIBRARY_MAPPINGS[attrs.library].each {
-                        if (!request[INCLUDED_JS].contains(it)) {
-                            request[INCLUDED_JS] << it
-                            def newattrs = [:] + attrs
-                            newattrs.src = String.valueOf(it) + '.js'
-                            javascriptInclude(newattrs)
-                        }
-                    }
-                    includedLibrary(attrs.library)
-                }
-                else {
-                    if (!request[INCLUDED_LIBRARIES].contains(attrs.library)) {
-                        def newattrs = [:] + attrs
-                        newattrs.src = String.valueOf(newattrs.remove('library')) + '.js'
-                        javascriptInclude(newattrs)
-                        includedLibrary(attrs.library)
-                        request[INCLUDED_JS] << attrs.library
-                    }
-                }
-            }
-        }
-        else {
+        } else {
             if (hasResourceProcessor) {
                 out << r.script(Collections.EMPTY_MAP, body)
             } else {
@@ -140,12 +78,6 @@ class JavascriptTagLib implements ApplicationContextAware, TagLibrary {
                 out.println()
                 out.println '</script>'
             }
-        }
-    }
-
-    private includedLibrary(library) {
-        if (!request[INCLUDED_LIBRARIES].contains(library)) {
-            request[INCLUDED_LIBRARIES] << library
         }
     }
 
@@ -180,245 +112,6 @@ class JavascriptTagLib implements ApplicationContextAware, TagLibrary {
     }
 
     /**
-     * Creates a remote function call.
-     *
-     * @emptyTag
-     *
-     * @attr before The javascript function to call before the remote function call
-     * @attr after The javascript function to call after the remote function call
-     * @attr update Either a map containing the elements to update for 'success' or 'failure' states, or a string with the element to update in which cause failure events would be ignored
-     * @attr action the name of the action to use in the link, if not specified the default action will be linked
-     * @attr controller the name of the controller to use in the link, if not specified the current controller will be linked
-     * @attr id The id to use in the link
-     * @attr asynchronous Whether to do the call asynchronously or not (defaults to true, specified in 'options' array)
-     * @attr method The method to use the execute the call (defaults to "post")
-     */
-    Closure remoteFunction = { attrs ->
-        // before remote function
-        def after = ''
-        if (attrs.before) {
-            out << "${attrs.remove('before')};"
-        }
-        if (attrs.after) {
-            after = "${attrs.remove('after')};"
-        }
-
-        getProvider().doRemoteFunction(owner, attrs, out)
-        attrs.remove('update')
-        // after remote function
-        if (after) {
-            out << after
-        }
-    }
-
-    private setUpRequestAttributes() {
-        if (!request[INCLUDED_JS]) request[INCLUDED_JS] = []
-        if (!request[INCLUDED_LIBRARIES]) request[INCLUDED_LIBRARIES] = []
-    }
-
-    /**
-     * Normal map implementation does a shallow clone. This implements a deep clone for maps
-     * using recursion.
-     */
-    private deepClone(Map map) {
-        def cloned = [:]
-        map.each { k,v ->
-            if (v instanceof Map) {
-                cloned[k] = deepClone(v)
-            }
-            else {
-                cloned[k] = v
-            }
-        }
-        return cloned
-    }
-
-    /**
-     * Creates a link to a remote uri that can be invoked via ajax.
-     *
-     * @attr update Either a map containing the elements to update for 'success' or 'failure' states, or a string with the element to update in which cause failure events would be ignored
-     * @attr before The javascript function to call before the remote function call
-     * @attr after The javascript function to call after the remote function call
-     * @attr asynchronous Whether to do the call asynchronously or not (defaults to true)
-     * @attr method The method to use the execute the call (defaults to "post")
-     * @attr controller The name of the controller to use in the link, if not specified the current controller will be linked
-     * @attr action The name of the action to use in the link, if not specified the default action will be linked
-     * @attr uri relative URI
-     * @attr url A map containing the action,controller,id etc.
-     * @attr base Sets the prefix to be added to the link target address, typically an absolute server URL. This overrides the behaviour of the absolute property, if both are specified.
-     * @attr absolute If set to "true" will prefix the link target address with the value of the grails.serverURL property from Config, or http://localhost:&lt;port&gt; if no value in Config and not running in production.
-     * @attr id The id to use in the link
-     * @attr fragment The link fragment (often called anchor tag) to use
-     * @attr params A map containing URL query parameters
-     * @attr mapping The named URL mapping to use to rewrite the link
-     * @attr elementId the DOM element id
-     */
-    Closure remoteLink = { attrs, body ->
-        Encoder htmlEncoder = codecLookup?.lookupEncoder('HTML')
-        out << '<a href="'
-
-        def cloned = deepClone(attrs)
-        out << htmlEncoder.encode(createLink(cloned))
-
-        out << '" onclick="'
-        // create remote function
-        out << remoteFunction(attrs)
-        out << 'return false;"'
-
-        // These options should not be included as attributes of the anchor element.
-        attrs.remove('method')
-        attrs.remove('url')
-        attrs.remove('action')
-        attrs.remove('controller')
-
-        // handle elementId like link
-        def elementId = attrs.remove('elementId')
-        if (elementId) {
-            out << " id=\"${htmlEncoder.encode(elementId)}\""
-        }
-
-        // process remaining attributes
-        attrs.each { k,v ->
-            out << ' ' << htmlEncoder.encode(k) << "=\"" << htmlEncoder.encode(v) << "\""
-        }
-        out << ">"
-        // output the body
-        out << body()
-
-        // close tag
-        out << "</a>"
-    }
-
-    /**
-     * A field that sends its value to a remote link.
-     *
-     * @emptyTag
-     *
-     * @attr name REQUIRED the name of the field
-     * @attr value The initial value of the field
-     * @attr paramName The name of the parameter send to the server
-     * @attr action the name of the action to use in the link, if not specified the default action will be linked
-     * @attr controller the name of the controller to use in the link, if not specified the current controller will be linked
-     * @attr id The id to use in the link
-     * @attr update Either a map containing the elements to update for 'success' or 'failure' states, or a string with the element to update in which cause failure events would be ignored
-     * @attr before The javascript function to call before the remote function call
-     * @attr after The javascript function to call after the remote function call
-     * @attr asynchronous Whether to do the call asynchronously or not (defaults to true)
-     * @attr method The method to use the execute the call (defaults to "post")
-     */
-    Closure remoteField = { attrs, body ->
-        Encoder htmlEncoder = codecLookup?.lookupEncoder('HTML')
-        def paramName = attrs.paramName ? attrs.remove('paramName') : 'value'
-        def value = attrs.remove('value')
-        if (!value) value = ''
-
-        out << "<input type=\"text\" name=\"${htmlEncoder.encode(attrs.remove('name'))}\" value=\"${htmlEncoder.encode(value)}\" onkeyup=\""
-
-        if (attrs.params) {
-            if (attrs.params instanceof Map) {
-                attrs.params[paramName] = new JavascriptValue('this.value')
-            }
-            else {
-                attrs.params += "+'${paramName}='+this.value"
-            }
-        }
-        else {
-            attrs.params = "'${paramName}='+this.value"
-        }
-        out << remoteFunction(attrs)
-        attrs.remove('params')
-        out << "\""
-        attrs.remove('url')
-        attrs.each { k,v->
-            out << ' ' << htmlEncoder.encode(k) << "=\"" << htmlEncoder.encode(v) << "\""
-        }
-        out <<" />"
-    }
-
-    /**
-     * A form which uses the javascript provider to serialize its parameters and submit via an asynchronous ajax call.
-     *
-     * @attr name REQUIRED The form name
-     * @attr url REQUIRED The url to submit to as either a map (containing values for the controller, action, id, and params) or a URL string
-     * @attr action The action to execute as a fallback, defaults to the url if non specified
-     * @attr update Either a map containing the elements to update for 'success' or 'failure' states, or a string with the element to update in which cause failure events would be ignored
-     * @attr before The javascript function to call before the remote function call
-     * @attr after The javascript function to call after the remote function call
-     * @attr asynchronous Whether to do the call asynchronously or not (defaults to true)
-     * @attr method The method to use the execute the call (defaults to "post")
-     */
-    Closure formRemote = { attrs, body ->
-        if (!attrs.name) {
-            throwTagError("Tag [formRemote] is missing required attribute [name]")
-        }
-        if (!attrs.url) {
-            throwTagError("Tag [formRemote] is missing required attribute [url]")
-        }
-
-        // 'formRemote' does not support the 'params' attribute.
-        if (attrs.params != null) {
-            throwTagError("""\
-Tag [formRemote] does not support the [params] attribute - add\
-a 'params' key to the [url] attribute instead.""")
-        }
-
-        // get javascript provider
-        def p = getProvider()
-        def url = attrs.url
-        if (!(url instanceof CharSequence)) {
-            url = deepClone(attrs.url)
-        }
-
-        // prepare form settings
-        p.prepareAjaxForm(attrs)
-
-        def params = [onsubmit:remoteFunction(attrs) + 'return false',
-                      method: (attrs.method? attrs.method : 'post'),
-                      action: (attrs.action? attrs.action : url instanceof CharSequence ? url.toString() : createLink(url))]
-        attrs.remove('url')
-        params.putAll(attrs)
-        if (params.name && !params.id) {
-            params.id = params.name
-        }
-
-        // The <form> element shouldn't have a 'name' attribute.
-        // See http://jira.codehaus.org/browse/GRAILS-2839
-        params.remove 'name'
-
-        out << withTag(name:'form',attrs:params) {
-            out << body()
-        }
-    }
-
-    /**
-     * Creates a form submit button that submits the current form to a remote ajax call.
-     *
-     * @attr url The url to submit to, either a map contraining keys for the action,controller and id or string value
-     * @attr update Either a map containing the elements to update for 'success' or 'failure' states, or a string with the element to update in which cause failure events would be ignored
-     * @attr before The javascript function to call before the remote function call
-     * @attr after The javascript function to call after the remote function call
-     * @attr asynchronous Whether to do the call asynchronously or not (defaults to true)
-     * @attr method The method to use the execute the call (defaults to "post")
-     */
-    Closure submitToRemote = { attrs, body ->
-        // get javascript provider
-        def p = getProvider()
-        // prepare form settings
-        attrs.forSubmitTag = ".form"
-        p.prepareAjaxForm(attrs)
-        def params = [onclick: remoteFunction(attrs) + 'return false',
-                      type: 'button',
-                      name: attrs.remove('name'),
-                      value: attrs.remove('value'),
-                      id: attrs.remove('id'),
-                      'class': attrs.remove('class')]
-
-        out << withTag(name: 'input', attrs: params) {
-            out << body()
-        }
-    }
-
-    /**
      * Escapes a javascript string replacing single/double quotes and new lines.<br/>
      *
      * &lt;g:escapeJavascript&gt;This is some "text" to be escaped&lt;/g:escapeJavascript&gt;
@@ -431,54 +124,4 @@ a 'params' key to the [url] attribute instead.""")
             out << attrs.value
         }
     }
-
-    Closure setProvider = { attrs, body ->
-        if (request[JavascriptTagLib.INCLUDED_LIBRARIES] == null) {
-            request[JavascriptTagLib.INCLUDED_LIBRARIES] = []
-        }
-        request[JavascriptTagLib.INCLUDED_LIBRARIES] << attrs.library
-    }
-
-    /**
-     * Returns the provider of the necessary function calls to perform Javascript functions
-     */
-    private JavascriptProvider getProvider() {
-        setUpRequestAttributes()
-        def providerClass = PROVIDER_MAPPINGS.find { request[JavascriptTagLib.INCLUDED_LIBRARIES]?.contains(it.key) }?.value
-        if (providerClass == null) {
-            if (defaultProvider == null) {
-                throw new GrailsTagException("No javascript provider is configured")
-            }
-            return defaultProvider.newInstance()
-        }
-        return providerClass.newInstance()
-    }
-}
-
-/**
- * Defines methods that a JavaScript provider must implement.
- *
- * @author Graeme Rocher
- */
-interface JavascriptProvider {
-
-    /**
-     * Creates a remote function call
-     *
-     * @param The attributes to use
-     * @param The output to write to
-     */
-    def doRemoteFunction(taglib,attrs, out)
-
-    def prepareAjaxForm(attrs)
-}
-
-class JavascriptValue {
-    def value
-
-    JavascriptValue(value) {
-        this.value = value
-    }
-
-    String toString() { "'+$value+'" }
 }

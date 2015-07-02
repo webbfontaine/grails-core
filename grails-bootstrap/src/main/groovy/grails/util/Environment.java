@@ -25,6 +25,7 @@ import java.util.Map;
 
 import org.codehaus.groovy.control.MultipleCompilationErrorsException;
 import org.codehaus.groovy.runtime.DefaultGroovyMethods;
+import org.grails.io.support.MainClassFinder;
 
 /**
  * Represents the current environment.
@@ -193,7 +194,7 @@ public enum Environment {
      * @return true if the application is running in development mode
      */
     public static boolean isDevelopmentMode() {
-        return getCurrent() == DEVELOPMENT && !(Metadata.getCurrent().isWarDeployed()) &&
+        return getCurrent() == DEVELOPMENT && Metadata.getCurrent().isDevelopmentEnvironmentAvailable() &&
                 cachedHasGrailsHome;
     }
 
@@ -496,6 +497,13 @@ public enum Environment {
             File current = new File(".", "grails-app");
             if(current.exists()) {
                 location = current.getParentFile().getAbsolutePath();
+            }
+            else {
+                current = new File(".", "settings.gradle");
+                if(current.exists()) {
+                    // multi-project build
+
+                }
             }
         }
         return location;

@@ -21,6 +21,7 @@ import grails.core.support.GrailsApplicationAware
 import grails.plugins.Plugin
 import grails.util.Environment
 import grails.util.GrailsUtil
+import groovy.transform.CompileStatic
 import groovy.util.logging.Commons
 import org.grails.core.artefact.ControllerArtefactHandler
 import org.grails.plugins.web.servlet.context.BootStrapClassRunner
@@ -38,6 +39,8 @@ import org.springframework.core.Ordered
 import org.springframework.util.ClassUtils
 import org.springframework.web.filter.CharacterEncodingFilter
 import org.springframework.web.multipart.support.StandardServletMultipartResolver
+import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurerAdapter
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerAdapter
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
 import org.springframework.web.servlet.view.DefaultRequestToViewNameTranslator
@@ -67,9 +70,14 @@ class ControllersGrailsPlugin extends Plugin {
         def defaultScope = config.getProperty(Settings.CONTROLLERS_DEFAULT_SCOPE, 'prototype')
         boolean useJsessionId = config.getProperty(Settings.GRAILS_VIEWS_ENABLE_JSESSIONID, Boolean, false)
         def uploadTmpDir = config.getProperty(Settings.CONTROLLERS_UPLOAD_LOCATION, System.getProperty("java.io.tmpdir"))
+        long maxFileSize = config.getProperty(Settings.CONTROLLERS_UPLOAD_MAX_FILE_SIZE, Long, 128000L)
+        long maxRequestSize = config.getProperty(Settings.CONTROLLERS_UPLOAD_MAX_REQUEST_SIZE, Long, 128000L)
+        int fileSizeThreashold = config.getProperty(Settings.CONTROLLERS_UPLOAD_FILE_SIZE_THRESHOLD, Integer, 0)
         def filtersEncoding = config.getProperty(Settings.FILTER_ENCODING, 'utf-8')
         boolean dbConsoleEnabled = config.getProperty(Settings.DBCONSOLE_ENABLED, Boolean, Environment.current == Environment.DEVELOPMENT)
 
+        int resourcesCachePeriod = config.getProperty(Settings.RESOURCES_CACHE_PERIOD, Integer, 0)
+        boolean resourcesEnabled = config.getProperty(Settings.RESOURCES_ENABLED, Boolean, true)
 
         bootStrapClassRunner(BootStrapClassRunner)
         tokenResponseActionResultTransformer(TokenResponseActionResultTransformer)
@@ -113,7 +121,7 @@ class ControllersGrailsPlugin extends Plugin {
         }
 
         multipartResolver(StandardServletMultipartResolver)
-        multipartConfigElement(MultipartConfigElement, uploadTmpDir)
+        multipartConfigElement(MultipartConfigElement, uploadTmpDir, maxFileSize, maxRequestSize, fileSizeThreashold)
 
         def handlerInterceptors = springConfig.containsBean("localeChangeInterceptor") ? [ref("localeChangeInterceptor")] : []
         def interceptorsClosure = {
@@ -123,11 +131,15 @@ class ControllersGrailsPlugin extends Plugin {
         annotationHandlerMapping(RequestMappingHandlerMapping, interceptorsClosure)
         annotationHandlerAdapter(RequestMappingHandlerAdapter)
 
+        // add Grails webmvc config
+        webMvcConfig(GrailsWebMvcConfigurer, resourcesCachePeriod, resourcesEnabled)
+
         // add the dispatcher servlet
         dispatcherServlet(GrailsDispatcherServlet)
         dispatcherServletRegistration(ServletRegistrationBean, ref("dispatcherServlet"), "/*") {
             loadOnStartup = 2
             asyncSupported = true
+            multipartConfig = multipartConfigElement
         }
 
         viewNameTranslator(DefaultRequestToViewNameTranslator) {
@@ -187,5 +199,51 @@ class ControllersGrailsPlugin extends Plugin {
     }
 
 
+    @CompileStatic
+    static class GrailsWebMvcConfigurer extends WebMvcConfigurerAdapter {
+
+        private static final String[] SERVLET_RESOURCE_LOCATIONS = [ "/" ]
+
+        private static final String[] CLASSPATH_RESOURCE_LOCATIONS = [
+            "classpath:/META-INF/resources/", "classpath:/resources/",
+            "classpath:/static/", "classpath:/public/" ]
+
+        private static final String[] RESOURCE_LOCATIONS
+        static {
+            RESOURCE_LOCATIONS = new String[CLASSPATH_RESOURCE_LOCATIONS.length
+                    + SERVLET_RESOURCE_LOCATIONS.length]
+            System.arraycopy(SERVLET_RESOURCE_LOCATIONS, 0, RESOURCE_LOCATIONS, 0,
+                    SERVLET_RESOURCE_LOCATIONS.length)
+            System.arraycopy(CLASSPATH_RESOURCE_LOCATIONS, 0, RESOURCE_LOCATIONS,
+                    SERVLET_RESOURCE_LOCATIONS.length, CLASSPATH_RESOURCE_LOCATIONS.length);
+        }
+
+        boolean addMappings = true
+        Integer cachePeriod
+
+        GrailsWebMvcConfigurer(Integer cachePeriod, boolean addMappings = true) {
+            this.addMappings = addMappings
+            this.cachePeriod = cachePeriod
+        }
+
+        @Override
+        @Override
+        public void addResourceHandlers(ResourceHandlerRegistry registry) {
+            if (!addMappings) {
+                return
+            }
+
+            if (!registry.hasMappingForPattern("/webjars/**")) {
+                registry.addResourceHandler("/webjars/**")
+                        .addResourceLocations("classpath:/META-INF/resources/webjars/")
+                        .setCachePeriod(cachePeriod)
+            }
+            if (!registry.hasMappingForPattern("/**")) {
+                registry.addResourceHandler("/**")
+                        .addResourceLocations(RESOURCE_LOCATIONS)
+                        .setCachePeriod(cachePeriod)
+            }
+        }
+    }
 
 }

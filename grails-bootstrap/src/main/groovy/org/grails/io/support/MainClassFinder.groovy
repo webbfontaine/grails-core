@@ -8,6 +8,8 @@ import groovyjarjarasm.asm.MethodVisitor
 import groovyjarjarasm.asm.Opcodes
 import groovyjarjarasm.asm.Type
 
+import java.nio.file.Paths
+
 /**
  * @author Graeme Rocher
  * @since 3.0
@@ -23,36 +25,60 @@ class MainClassFinder {
 
     static String mainClassName = null
 
-    static String searchMainClass() {
+    /**
+     * Searches for the main class relative to the give path that is within the project tree
+     *
+     * @param path The path as a URI
+     * @return The name of the main class
+     */
+    static String searchMainClass(URI path) {
         if(mainClassName) return mainClassName
 
-        def classesDir = BuildSettings.CLASSES_DIR
-        Collection<File> searchDirs
-        if (classesDir == null) {
-            def tokens = System.getProperty('java.class.path').split(System.getProperty('path.separator'))
-            def dirs = tokens.findAll() { String str -> !str.endsWith('.jar') }.collect() { String str -> new File(str) }
-            searchDirs = dirs.findAll() { File f -> f.isDirectory() }
-        } else {
-            searchDirs = [classesDir]
+        try {
+            File file = path ? Paths.get(path).toFile() : null
+            def rootDir = findRootDirectory(file)
+
+            def classesDir = BuildSettings.CLASSES_DIR
+            Collection<File> searchDirs
+            if (classesDir == null) {
+                searchDirs = []
+            } else {
+                searchDirs = [classesDir]
+            }
+
+            if(rootDir) {
+                def rootClassesDir = new File(rootDir, "build/classes/main")
+                if(rootClassesDir.exists()) {
+                    searchDirs << rootClassesDir
+                }
+            }
+
+            String mainClass = null
+
+            for (File dir in searchDirs) {
+                mainClass = findMainClass(dir)
+                if (mainClass) break
+            }
+            return mainClass
+        } catch (Throwable e) {
+            return null
         }
-        def userDir = new File(System.getProperty('user.dir'))
-        if(new File(userDir, 'settings.gradle').exists()) {
-            userDir.eachDir { File dir ->
-                // looking for subproject build directories...
-                def mainClassesDir = new File(dir, 'build/classes/main')
-                if(mainClassesDir.exists()) {
-                    searchDirs << mainClassesDir
+    }
+
+    private static File findRootDirectory(File file) {
+        if(file) {
+            def parent = file.parentFile
+
+            while(parent != null) {
+                if(new File(parent, "build.gradle").exists() || new File(parent, "grails-app").exists()) {
+                    return parent
+                }
+                else {
+                    parent = parent.parentFile
                 }
             }
         }
-
-        String mainClass = null
-
-        for (File dir in searchDirs) {
-            mainClass = findMainClass(dir)
-            if (mainClass) break
-        }
-        mainClass
+        return null
     }
 
     static String findMainClass(File rootFolder = BuildSettings.CLASSES_DIR) {

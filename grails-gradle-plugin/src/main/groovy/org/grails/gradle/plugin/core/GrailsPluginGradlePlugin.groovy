@@ -1,10 +1,14 @@
 package org.grails.gradle.plugin.core
 
 import org.gradle.api.Project
+import org.gradle.api.Task
 import org.gradle.api.tasks.Copy
 import org.gradle.api.tasks.JavaExec
 import org.gradle.api.tasks.bundling.Jar
 import org.gradle.language.jvm.tasks.ProcessResources
+import org.gradle.tooling.provider.model.ToolingModelBuilderRegistry
+
+import javax.inject.Inject
 
 /*
  * Copyright 2014 original authors
@@ -31,32 +35,130 @@ import org.gradle.language.jvm.tasks.ProcessResources
  */
 class GrailsPluginGradlePlugin extends GrailsGradlePlugin {
 
+    @Inject
+    GrailsPluginGradlePlugin(ToolingModelBuilderRegistry registry) {
+        super(registry)
+    }
+
     @Override
     void apply(Project project) {
         super.apply(project)
 
-        def providedConfig = project.configurations.create("provided")
+        configureAstSources(project)
+
+        configureProjectNameAndVersionASTMetadata(project)
+
+        configurePluginResources(project)
+
+        configurePluginJarTask(project)
+
+        configureSourcesJarTask(project)
+
+    }
+
+    @Override
+    protected Task createBuildPropertiesTask(Project project) {
+        // no-op
+    }
+
+    protected void configureSourcesJarTask(Project project) {
+        def sourcesJar = project.tasks.create("sourcesJar", Jar).configure {
+            classifier = 'sources'
+            from project.sourceSets.main.allSource
+        }
+    }
+
+    protected void configureAstSources(Project project) {
         def sourceSets = project.sourceSets
         def mainSourceSet = sourceSets.main
 
         project.sourceSets {
-            def providedFiles = project.files(providedConfig)
             ast {
                 groovy {
-                    compileClasspath += project.configurations.compile + providedFiles
+                    compileClasspath += project.configurations.compile
                 }
             }
             main {
-                compileClasspath += providedFiles + sourceSets.ast.output
+                compileClasspath += sourceSets.ast.output
             }
             test {
-                compileClasspath += providedFiles + sourceSets.ast.output
-                runtimeClasspath += providedFiles
+                compileClasspath += sourceSets.ast.output
             }
         }
 
-        def projectTasks = project.tasks
-        def configScriptTask = projectTasks.create('configScript')
+        def copyAstClasses = project.task(type: Copy, "copyAstClasses") {
+            from sourceSets.ast.output
+            into mainSourceSet.output.classesDir
+        }
+        project.tasks.getByName('classes').dependsOn(copyAstClasses)
+
+        project.tasks.withType(JavaExec) {
+            classpath += sourceSets.ast.output
+        }
+
+        def javadocTask = project.tasks.findByName('javadoc')
+        def groovydocTask = project.tasks.findByName('groovydoc')
+        if (javadocTask) {
+            javadocTask.configure {
+                source += sourceSets.ast.allJava
+            }
+        }
+
+        if (groovydocTask) {
+            project.tasks.create("javadocJar", Jar).configure {
+                classifier = 'javadoc'
+                from groovydocTask.outputs
+            }.dependsOn(javadocTask)
+
+            groovydocTask.configure {
+                source += sourceSets.ast.allJava
+            }
+        }
+    }
+
+    protected void configurePluginJarTask(Project project) {
+        project.jar {
+            exclude "logback.groovy"
+        }
+    }
+
+    protected void configurePluginResources(Project project) {
+        project.afterEvaluate() {
+            ProcessResources processResources = (ProcessResources) project.tasks.getByName('processResources')
+            GrailsExtension grailsExtension = project.extensions.findByType(GrailsExtension)
+
+            def processResourcesDependencies = []
+            if(grailsExtension.packageAssets) {
+                processResourcesDependencies << project.task(type: Copy, "copyAssets") {
+                    from "${project.projectDir}/grails-app/assets/javascripts"
+                    from "${project.projectDir}/grails-app/assets/stylesheets"
+                    from "${project.projectDir}/grails-app/assets/images"
+                    into "${processResources.destinationDir}/META-INF/assets"
+                }
+            }
+
+
+            processResourcesDependencies << project.task(type: Copy, "copyCommands") {
+                from "${project.projectDir}/src/main/scripts"
+                into "${processResources.destinationDir}/META-INF/commands"
+            }
+
+            processResourcesDependencies << project.task(type: Copy, "copyTemplates") {
+                from "${project.projectDir}/src/main/templates"
+                into "${processResources.destinationDir}/META-INF/templates"
+            }
+
+            processResources.dependsOn(*processResourcesDependencies)
+            project.processResources {
+                rename "application.yml", "plugin.yml"
+                exclude "spring/resources.groovy"
+            }
+        }
+
+    }
+
+    protected void configureProjectNameAndVersionASTMetadata(Project project) {
+        def configScriptTask = project.tasks.create('configScript')
 
         def configFile = project.file("$project.buildDir/config.groovy")
         configScriptTask.outputs.file(configFile)
@@ -72,71 +174,14 @@ withConfig(configuration) {
     inline(phase: 'CONVERSION') { source, context, classNode ->
         classNode.putNodeMetaData('projectVersion', '$projectVersion')
         classNode.putNodeMetaData('projectName', '$projectName')
+        classNode.putNodeMetaData('isPlugin', 'true')
     }
 }
 """
         }
-
-        ProcessResources processResources = (ProcessResources) projectTasks.getByName('processResources')
-
-        def copyCommands = project.task(type:Copy, "copyCommands") {
-            from "${project.projectDir}/src/main/scripts"
-            into "${processResources.destinationDir}/META-INF/commands"
-        }
-
-        def copyTemplates = project.task(type:Copy, "copyTemplates") {
-            from "${project.projectDir}/src/main/templates"
-            into "${processResources.destinationDir}/META-INF/templates"
-        }
-
-        def copyAstClasses = project.task(type:Copy, "copyAstClasses") {
-            from sourceSets.ast.output
-            into mainSourceSet.output.classesDir
-        }
-        processResources.dependsOn(copyCommands, copyTemplates)
-        projectTasks.getByName('compileGroovy').dependsOn(configScriptTask)
-        projectTasks.getByName('classes').dependsOn(copyAstClasses)
-        project.processResources {
-            rename "application.yml", "plugin.yml"
-            exclude "spring/resources.groovy"
-        }
-        project.jar {
-            exclude "logback.groovy"
-        }
+        project.tasks.getByName('compileGroovy').dependsOn(configScriptTask)
         project.compileGroovy {
             groovyOptions.configurationScript = configFile
         }
-
-        project.tasks.withType(JavaExec) {
-            classpath += project.configurations.provided + sourceSets.ast.output
-        }
-
-        def javadocTask = projectTasks.findByName('javadoc')
-        def groovydocTask = projectTasks.findByName('groovydoc')
-        if(javadocTask) {
-            javadocTask.configure {
-                source += sourceSets.ast.allJava
-                classpath += project.configurations.provided
-            }
-        }
-
-
-        if(groovydocTask) {
-            projectTasks.create("javadocJar", Jar).configure {
-                classifier = 'javadoc'
-                from groovydocTask.outputs
-            }.dependsOn(javadocTask)
-
-            groovydocTask.configure {
-                source += sourceSets.ast.allJava
-                classpath += project.configurations.provided
-            }
-        }
-
-        def sourcesJar = projectTasks.create("sourcesJar", Jar).configure {
-            classifier = 'sources'
-            from mainSourceSet.allSource
-        }
-
     }
 }

@@ -1,7 +1,9 @@
 package grails.boot
+
+import grails.boot.config.tools.SettingsFile
+import grails.core.GrailsApplication
 import grails.plugins.GrailsPlugin
 import grails.plugins.GrailsPluginManager
-import grails.util.BuildSettings
 import grails.util.Environment
 import groovy.transform.CompileDynamic
 import groovy.transform.CompileStatic
@@ -11,6 +13,7 @@ import org.apache.commons.logging.LogFactory
 import org.codehaus.groovy.control.CompilationFailedException
 import org.codehaus.groovy.control.CompilationUnit
 import org.codehaus.groovy.control.CompilerConfiguration
+import org.grails.boot.internal.JavaCompiler
 import org.grails.io.watch.DirectoryWatcher
 import org.grails.io.watch.FileExtensionFileChangeListener
 import org.grails.plugins.support.WatchPattern
@@ -37,12 +40,14 @@ class GrailsApp extends SpringApplication {
 
     private final Log log = LogFactory.getLog(getClass())
 
+    private static boolean developmentModeActive = false
+    private static DirectoryWatcher directoryWatcher
+
     @Override
     ConfigurableApplicationContext run(String... args) {
-        System.setProperty(BuildSettings.RUN_EXECUTED, "true")
         def applicationContext = super.run(args)
 
-        grails.util.Environment environment = grails.util.Environment.getCurrent()
+        Environment environment = Environment.getCurrent()
         if(environment.isReloadEnabled()) {
             enableDevelopmentModeWatch(environment, applicationContext)
         }
@@ -69,9 +74,9 @@ class GrailsApp extends SpringApplication {
 
     @Override
     protected void configureEnvironment(ConfigurableEnvironment environment, String[] args) {
+        configurePropertySources(environment, args)
+
         def env = Environment.current
-
-
         environment.addActiveProfile(env.name)
     }
 
@@ -80,76 +85,103 @@ class GrailsApp extends SpringApplication {
         def location = environment.getReloadLocation()
 
         if(location) {
-            DirectoryWatcher directoryWatcher = new DirectoryWatcher()
+            directoryWatcher = new DirectoryWatcher()
             configureDirectoryWatcher(directoryWatcher, location)
             Queue<File> changedFiles = new ConcurrentLinkedQueue<>()
+            Queue<File> newFiles = new ConcurrentLinkedQueue<>()
 
             directoryWatcher.addListener(new FileExtensionFileChangeListener(['groovy', 'java']) {
                 @Override
                 void onChange(File file, List<String> extensions) {
-                    changedFiles << file
+                    changedFiles << file.canonicalFile
                 }
 
                 @Override
                 void onNew(File file, List<String> extensions) {
-                    changedFiles << file
+                    changedFiles << file.canonicalFile
+                    newFiles << file.canonicalFile
                 }
             })
 
+            def pluginManagerListener = createPluginManagerListener(applicationContext)
+            directoryWatcher.addListener(pluginManagerListener)
 
-            def pluginManager = applicationContext.getBean(GrailsPluginManager)
-            directoryWatcher.addListener(new DirectoryWatcher.FileChangeListener() {
-                @Override
-                void onChange(File file) {
-                    if(!file.name.endsWith('.groovy') && !file.name.endsWith('.java')) {
-                        pluginManager.informOfFileChange(file)
-                    }
+            File baseDir = new File(location).canonicalFile
+
+            List<File> watchBaseDirectories = [baseDir]
+            def parentDir = baseDir.parentFile
+            File settingsFile = new File(parentDir, "settings.gradle")
+
+            if(settingsFile.exists()) {
+                def cc = new CompilerConfiguration()
+                cc.scriptBaseClass = SettingsFile.name
+                def binding = new Binding()
+                def shell = new GroovyShell(Thread.currentThread().contextClassLoader, binding, cc)
+                try {
+                    shell.evaluate(settingsFile)
+                } catch (Throwable e) {
+                    // ignore
                 }
-
-                @Override
-                void onNew(File file) {
-                    if(!file.name.endsWith('.groovy') && !file.name.endsWith('.java')) {
-                        pluginManager.informOfFileChange(file)
-                    }
-                }
-            })
-
-            for(GrailsPlugin plugin in pluginManager.allPlugins) {
-                for(WatchPattern wp in plugin.watchedResourcePatterns) {
-                    if(wp.file) {
-                        directoryWatcher.addWatchFile(wp.file)
-                    }
-                    else if(wp.directory && wp.extension) {
-                        directoryWatcher.addWatchDirectory(wp.directory, wp.extension)
+                def projectPaths = binding.getVariables().get('projectPaths')
+                if(projectPaths) {
+                    for(path in projectPaths) {
+                        watchBaseDirectories << new File(parentDir, path.toString())
                     }
                 }
             }
 
+            def locationLength = location.length() + 1
+            def pluginManager = applicationContext.getBean(GrailsPluginManager)
+            for(GrailsPlugin plugin in pluginManager.allPlugins) {
+                for(WatchPattern wp in plugin.watchedResourcePatterns) {
+                    for(watchBase in watchBaseDirectories) {
+                        if(wp.file) {
+                            def resolvedPath = new File(watchBase, wp.file.path.substring(locationLength))
+                            directoryWatcher.addWatchFile(resolvedPath)
+                        }
+                        else if(wp.directory && wp.extension) {
+
+                            def resolvedPath = new File(watchBase, wp.directory.path.substring(locationLength))
+                            directoryWatcher.addWatchDirectory(resolvedPath, wp.extension)
+                        }
+                    }
+                }
+            }
+
+
+            developmentModeActive = true
             Thread.start {
                 CompilerConfiguration compilerConfig = new CompilerConfiguration()
                 compilerConfig.setTargetDirectory(new File(location, "build/classes/main"))
 
-                while(true) {
-                    def i = changedFiles.size()
+                while(developmentModeActive) {
+                    // Workaround for some IDE / OS combos - 2 events (new + update) for the same file
+                    def uniqueChangedFiles = changedFiles as Set
+                    changedFiles.clear()
+
+                    def i = uniqueChangedFiles.size()
                     try {
                         if(i > 1) {
-
-                            // more than one change, recompile and restart
-                            applicationContext.close()
-                            def unit = new CompilationUnit(compilerConfig)
-                            unit.addSources(changedFiles as File[])
-                            unit.compile()
-                            changedFiles.clear()
-                            super.run(args)
+                            for(f in uniqueChangedFiles) {
+                                recompile(f, compilerConfig, location)
+                                if(newFiles.contains(f)) {
+                                    newFiles.remove(f)
+                                    pluginManager.informOfFileChange(f)
+                                }
+                                sleep 1000
+                            }
                         }
                         else if(i == 1) {
-                            def changedFile = changedFiles.poll()
-                            println "File $changedFile changed, recompiling..."
-                            // only one change, just to a simple recompile and propagate the change
-                            def unit = new CompilationUnit(compilerConfig)
-                            unit.addSource(changedFile)
-                            unit.compile()
+                            def changedFile = uniqueChangedFiles[0]
+                            changedFile = changedFile.canonicalFile
+                            recompile(changedFile, compilerConfig, location)
+                            if(newFiles.contains(changedFile)) {
+                                newFiles.remove(changedFile)
+                                pluginManager.informOfFileChange(changedFile)
+                            }
                         }
+
+                        newFiles.clear()
                     } catch (CompilationFailedException cfe) {
                         log.error("Compilation Error: $cfe.message", cfe)
                     }
@@ -164,6 +196,60 @@ class GrailsApp extends SpringApplication {
 
     }
 
+    static void setDevelopmentModeActive(boolean active) {
+        developmentModeActive = active
+        directoryWatcher.active = active
+    }
+
+    protected void recompile(File changedFile, CompilerConfiguration compilerConfig, String location) {
+        File appDir = null
+        def changedPath = changedFile.path
+        if (changedPath.contains('/grails-app')) {
+            appDir = new File(changedPath.substring(0, changedPath.indexOf('/grails-app')))
+        }
+        def baseFileLocation = appDir?.absolutePath ?: location
+        compilerConfig.setTargetDirectory(new File(baseFileLocation, "build/classes/main"))
+        println "File $changedFile changed, recompiling..."
+        if(changedFile.name.endsWith('.java')) {
+            if(JavaCompiler.isAvailable()) {
+                JavaCompiler.recompile(compilerConfig, changedFile)
+            }
+            else {
+                log.error("Cannot recompile [$changedFile.name], the current JVM is not a JDK (recompilation will not work on a JRE missing the compiler APIs).")
+            }
+        }
+        else {
+            // only one change, just to a simple recompile and propagate the change
+            def unit = new CompilationUnit(compilerConfig)
+            unit.addSource(changedFile)
+            unit.compile()
+        }
+    }
+
+    /**
+     * Creates and returns a file change listener for notifying the plugin manager of changes.
+     * @param applicationContext - The running {@link org.springframework.context.ApplicationContext}
+     * @return {@link DirectoryWatcher.FileChangeListener}
+     */
+    protected static DirectoryWatcher.FileChangeListener createPluginManagerListener(ConfigurableApplicationContext applicationContext) {
+        def pluginManager = applicationContext.getBean(GrailsPluginManager)
+        return new DirectoryWatcher.FileChangeListener() {
+            @Override
+            void onChange(File file) {
+                if(!file.name.endsWith('.groovy') && !file.name.endsWith('.java')) {
+                    pluginManager.informOfFileChange(file)
+                }
+            }
+
+            @Override
+            void onNew(File file) {
+                if(!file.name.endsWith('.groovy') && !file.name.endsWith('.java')) {
+                    pluginManager.informOfFileChange(file)
+                }
+            }
+        }
+    }
+
     protected void configureDirectoryWatcher(DirectoryWatcher directoryWatcher, String location) {
         directoryWatcher.addWatchDirectory(new File(location, "grails-app"), ['groovy', 'java'])
         directoryWatcher.addWatchDirectory(new File(location, "src/main/groovy"), ['groovy', 'java'])
@@ -174,7 +260,16 @@ class GrailsApp extends SpringApplication {
     protected printRunStatus(ConfigurableApplicationContext applicationContext) {
         try {
             def protocol = System.getProperty('server.ssl.key-store') ? 'https' : 'http'
-            println("Grails application running at ${protocol}://localhost:${applicationContext.embeddedServletContainer.port}")
+            GrailsApplication app = applicationContext.getBean(GrailsApplication)
+            String context_path = app.config.getProperty('server.context-path', '')
+            if(context_path){
+                println("WARNING: 'server.context-path: ${context_path}' is deprecated. Please use 'server.contextPath: ${context_path}'")
+            } else {
+                context_path=''
+            }
+            // in spring-boot context-path is chosen before contextPath ...
+            String contextPath = context_path?context_path:app.config.getProperty('server.contextPath', '')
+            println("Grails application running at ${protocol}://localhost:${applicationContext.embeddedServletContainer.port}${contextPath} in environment: ${Environment.current.name}")
         } catch (e) {
             // ignore
         }

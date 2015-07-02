@@ -2,17 +2,18 @@ apply plugin:'application'
 
 mainClassName = "org.grails.cli.GrailsCli"
 
-repositories { 
+repositories {
     jcenter()
 }
 
 ext {
 //    gradleToolingApiVersion = gradle.gradleVersion
-    gradleToolingApiVersion = '2.3-rc-3'
+    gradleToolingApiVersion = '2.3'
 }
 
 dependencies {
     compile project(":grails-bootstrap")
+    compile project(":grails-gradle-model")
     compile "org.apache.ant:ant:$antVersion"
     compile "org.codehaus.groovy:groovy-ant:$groovyVersion"
     compile "org.codehaus.groovy:groovy-json:$groovyVersion"
@@ -27,6 +28,8 @@ dependencies {
     testCompile "com.github.jnr:jnr-posix:3.0.6"
 
     runtime "org.slf4j:slf4j-simple:$slf4jVersion"
+    runtime "org.codehaus.plexus:plexus-component-api:1.0-alpha-33"
+
 }
 
 eclipse {

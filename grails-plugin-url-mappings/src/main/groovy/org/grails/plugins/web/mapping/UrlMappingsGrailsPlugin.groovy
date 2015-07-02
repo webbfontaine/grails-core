@@ -35,6 +35,7 @@ import grails.web.mapping.UrlMappingsHolder
 import org.grails.web.mapping.UrlMappingsHolderFactoryBean
 import org.grails.web.mapping.mvc.UrlMappingsHandlerMapping
 import org.grails.web.mapping.mvc.UrlMappingsInfoHandlerAdapter
+import org.grails.web.mapping.servlet.UrlMappingsErrorPageCustomizer
 import org.springframework.aop.framework.ProxyFactoryBean
 import org.springframework.aop.target.HotSwappableTargetSource
 import org.springframework.context.ApplicationContext
@@ -69,6 +70,7 @@ class UrlMappingsGrailsPlugin extends Plugin {
 
         urlMappingsHandlerMapping(UrlMappingsHandlerMapping, ref("grailsUrlMappingsHolder"))
         urlMappingsInfoHandlerAdapter(UrlMappingsInfoHandlerAdapter)
+        urlMappingsErrorPageCustomizer(UrlMappingsErrorPageCustomizer)
         grailsLinkGenerator(cacheUrls ? CachingLinkGenerator : DefaultLinkGenerator, serverURL)
 
         if (Environment.isDevelopmentMode() || Environment.current.isReloadEnabled()) {
@@ -93,7 +95,7 @@ class UrlMappingsGrailsPlugin extends Plugin {
 
 
     @Override
-    void onChange(Map<String, Object> events) {
+    void onChange(Map<String, Object> event) {
         def application = grailsApplication
         if (!application.isArtefactOfType(UrlMappingsArtefactHandler.TYPE, event.source)) {
             return

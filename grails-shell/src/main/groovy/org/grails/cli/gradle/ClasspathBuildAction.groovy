@@ -17,7 +17,7 @@ package org.grails.cli.gradle
 
 import org.gradle.tooling.BuildAction
 import org.gradle.tooling.BuildController
-import org.gradle.tooling.model.eclipse.EclipseProject
+import org.grails.gradle.plugin.model.GrailsClasspath
 
 /**
  * Gets the EclipseProject which helps obtain the classpath necessary
@@ -25,9 +25,9 @@ import org.gradle.tooling.model.eclipse.EclipseProject
  * @author Graeme Rocher
  * @since 3.0
  */
-class ClasspathBuildAction implements BuildAction<EclipseProject>, Serializable {
+class ClasspathBuildAction implements BuildAction<GrailsClasspath>, Serializable {
     @Override
-    EclipseProject execute(BuildController controller) {
-        controller.getModel(EclipseProject)
+    GrailsClasspath execute(BuildController controller) {
+        controller.getModel(GrailsClasspath)
     }
 }

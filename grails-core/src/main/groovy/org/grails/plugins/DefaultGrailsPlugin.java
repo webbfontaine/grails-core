@@ -118,7 +118,11 @@ public class DefaultGrailsPlugin extends AbstractGrailsPlugin implements ParentA
         pluginDescriptor = resource;
         resolver = new PathMatchingResourcePatternResolver();
 
-        initialisePlugin(pluginClass);
+        try {
+            initialisePlugin(pluginClass);
+        } catch (Throwable e) {
+            throw new PluginException("Error initialising plugin for class ["+pluginClass.getName()+"]:" + e.getMessage(), e);
+        }
     }
 
     @Override
@@ -356,10 +360,11 @@ public class DefaultGrailsPlugin extends AbstractGrailsPlugin implements ParentA
             onChangeListener = (Closure) GrailsClassUtils.getPropertyOrStaticPropertyOrFieldValue(plugin, ON_CHANGE);
         }
 
-        final boolean warDeployed = Metadata.getCurrent().isWarDeployed();
+        final Metadata metadata = Metadata.getCurrent();
+        final boolean warDeployed = metadata.isWarDeployed();
         final boolean reloadEnabled = Environment.getCurrent().isReloadEnabled();
 
-        if (!((reloadEnabled || !warDeployed) && onChangeListener != null)) {
+        if (!((reloadEnabled || !warDeployed))) {
             return;
         }
 
@@ -763,7 +768,10 @@ public class DefaultGrailsPlugin extends AbstractGrailsPlugin implements ParentA
     }
 
     public void notifyOfEvent(Map event) {
-        if (onChangeListener != null) {
+        if(plugin instanceof Plugin) {
+            ((Plugin)plugin).onChange(event);
+        }
+        else if(onChangeListener != null) {
             invokeOnChangeListener(event);
         }
     }

@@ -15,6 +15,7 @@
  */
 
 package grails.test.runtime
+
 import grails.async.Promises
 import grails.boot.config.GrailsApplicationPostProcessor
 import grails.core.DefaultGrailsApplication
@@ -33,10 +34,9 @@ import org.grails.commons.CodecArtefactHandler
 import org.grails.commons.DefaultGrailsCodecClass
 import org.grails.core.lifecycle.ShutdownOperations
 import org.grails.core.util.ClassPropertyFetcher
-import org.grails.plugins.testing.GrailsMockErrors
+import org.grails.plugins.IncludingPluginFilter
 import org.grails.spring.RuntimeSpringConfiguration
 import org.grails.spring.beans.factory.OptimizedAutowireCapableBeanFactory
-import org.grails.validation.ConstraintEvalUtils
 import org.grails.web.context.ServletEnvironmentGrailsApplicationDiscoveryStrategy
 import org.grails.web.converters.configuration.ConvertersConfigurationHolder
 import org.grails.web.servlet.context.GrailsConfigUtils
@@ -61,6 +61,7 @@ import org.springframework.web.context.support.GenericWebApplicationContext
 
 import javax.servlet.ServletContext
 import java.lang.reflect.Modifier
+
 /**
  * A TestPlugin for TestRuntime that builds the GrailsApplication instance for tests
  * 
@@ -149,6 +150,7 @@ class GrailsApplicationTestPlugin implements TestPlugin {
         RootBeanDefinition beandef = new RootBeanDefinition(TestRuntimeGrailsApplicationPostProcessor.class);
         ConstructorArgumentValues constructorArgumentValues = new ConstructorArgumentValues()
         constructorArgumentValues.addIndexedArgumentValue(0, doWithSpringClosure)
+        constructorArgumentValues.addIndexedArgumentValue(1, (resolveTestCallback(callerInfo, "includePlugins") ?: TestRuntimeGrailsApplicationPostProcessor.DEFAULT_INCLUDED_PLUGINS) as Set )
         beandef.setConstructorArgumentValues(constructorArgumentValues)
         beandef.setPropertyValues(new MutablePropertyValues().add("loadExternalBeans", resolveTestCallback(callerInfo, "loadExternalBeans") as boolean).add("customizeGrailsApplicationClosure", customizeGrailsApplicationClosure))
         beandef.setRole(BeanDefinition.ROLE_INFRASTRUCTURE);
@@ -177,7 +179,6 @@ class GrailsApplicationTestPlugin implements TestPlugin {
 
     void initialState() {
         closeCachedSpringTestContexts()
-        ExpandoMetaClass.enableGlobally()
         Holders.clear()
         ClassPropertyFetcher.clearClassPropertyFetcherCache()
         CachedIntrospectionResults.clearClassLoader(this.getClass().classLoader)
@@ -249,26 +250,6 @@ class GrailsApplicationTestPlugin implements TestPlugin {
         (GrailsApplication)runtime.getValue('grailsApplication')
     }
     
-    void mockForConstraintsTests(TestRuntime runtime, Class clazz) {
-        ConstraintEvalUtils.clearDefaultConstraints()
-        mockGetErrors clazz
-    }
-    
-    @CompileStatic(TypeCheckingMode.SKIP)
-    void mockGetErrors(Class clazz) {
-        // rig up the getErrors() method to return an instance of GrailsMockErrors
-        def originalGetErrorsMethod = clazz.metaClass.getMetaMethod('getErrors', [] as Object[])
-        clazz.metaClass.getErrors = { ->
-            def result = originalGetErrorsMethod.invoke(delegate, [] as Object[])
-            if(result && !(result instanceof GrailsMockErrors)) {
-                def mockErrors = new GrailsMockErrors(delegate)
-                mockErrors.addAllErrors result
-                result = mockErrors
-            }
-            result
-        }
-    }
-
     void defineBeans(TestRuntime runtime, List<Closure> callables, RuntimeSpringConfiguration targetSpringConfig = null) {
         if(!callables) return
         def binding = new Binding()
@@ -377,9 +358,6 @@ class GrailsApplicationTestPlugin implements TestPlugin {
             case 'mockCodec':   
                 mockCodec(runtime, (Class)event.arguments.codecClass)
                 break
-            case 'mockForConstraintsTests':   
-                mockForConstraintsTests(runtime, (Class)event.arguments.clazz)
-                break
         }
     }
     
@@ -389,12 +367,20 @@ class GrailsApplicationTestPlugin implements TestPlugin {
     }
 
     static class TestRuntimeGrailsApplicationPostProcessor extends GrailsApplicationPostProcessor {
+        static final Set DEFAULT_INCLUDED_PLUGINS = ['core', 'eventBus'] as Set
         Closure customizeGrailsApplicationClosure
+        Set includedPlugins = DEFAULT_INCLUDED_PLUGINS
 
-        TestRuntimeGrailsApplicationPostProcessor(Closure doWithSpringClosure) {
+        TestRuntimeGrailsApplicationPostProcessor(Closure doWithSpringClosure, Set includedPlugins = DEFAULT_INCLUDED_PLUGINS) {
             super([doWithSpring: { -> doWithSpringClosure }] as GrailsApplicationLifeCycle, null, null)
             loadExternalBeans = false
             reloadingEnabled = false
+            this.includedPlugins = includedPlugins
+        }
+
+        @Override
+        protected void customizePluginManager(GrailsPluginManager grailsApplication) {
+            pluginManager.pluginFilter = new IncludingPluginFilter(includedPlugins)
         }
 
         @Override

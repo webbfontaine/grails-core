@@ -64,6 +64,11 @@ interface Settings {
      * The default configured constraints for the application
      */
     String GORM_DEFAULT_CONSTRAINTS = 'grails.gorm.default.constraints'
+
+    /**
+     * Whether to autowire instances
+     */
+    String GORM_AUTOWIRE_INSTANCES = "grails.gorm.autowire";
     /**
      * The configured mime types
      */
@@ -87,6 +92,21 @@ interface Settings {
      * The upload directory for controllers, defaults to java.tmp.dir
      */
     String CONTROLLERS_UPLOAD_LOCATION = "grails.controllers.upload.location"
+
+    /**
+     * The maximum file size
+     */
+    String CONTROLLERS_UPLOAD_MAX_FILE_SIZE = "grails.controllers.upload.maxFileSize"
+
+    /**
+     * The maximum request size
+     */
+    String CONTROLLERS_UPLOAD_MAX_REQUEST_SIZE = "grails.controllers.upload.maxRequestSize"
+
+    /**
+     * The file size threshold
+     */
+    String CONTROLLERS_UPLOAD_FILE_SIZE_THRESHOLD = "grails.controllers.upload.fileSizeThreshold"
 
     /**
      * The encoding to use for filters, default to UTF-8
@@ -117,4 +137,14 @@ interface Settings {
      * The suffix used during scaffolding for the domain
      */
     String SCAFFOLDING_DOMAIN_SUFFIX = 'grails.scaffolding.templates.domainSuffix'
+
+    /**
+     * The amount of time to cache static resource requests
+     */
+    String RESOURCES_CACHE_PERIOD = 'grails.resources.cachePeriod'
+
+    /**
+     * Whether serving static HTML pages from src/main/resources/public is enabled
+     */
+    String RESOURCES_ENABLED = 'grails.resources.enabled'
 }

@@ -16,6 +16,8 @@
 
 package org.grails.transaction.transform
 
+import grails.transaction.Rollback
+import groovy.transform.TypeChecked
 import org.codehaus.groovy.ast.stmt.Statement
 
 import static org.grails.compiler.injection.GrailsASTUtils.*
@@ -61,10 +63,12 @@ import org.springframework.transaction.interceptor.RollbackRuleAttribute
 @GroovyASTTransformation(phase = CompilePhase.CANONICALIZATION)
 class TransactionalTransform implements ASTTransformation{
     public static final ClassNode MY_TYPE = new ClassNode(Transactional)
+    public static final ClassNode COMPILE_STATIC_TYPE = ClassHelper.make(CompileStatic)
+    public static final ClassNode TYPE_CHECKED_TYPE = ClassHelper.make(TypeChecked)
     private static final String PROPERTY_TRANSACTION_MANAGER = "transactionManager"
     private static final String METHOD_EXECUTE = "execute"
     private static final Set<String> METHOD_NAME_EXCLUDES = new HashSet<String>(Arrays.asList("afterPropertiesSet", "destroy"));
-    private static final Set<String> ANNOTATION_NAME_EXCLUDES = new HashSet<String>(Arrays.asList(PostConstruct.class.getName(), PreDestroy.class.getName(), Transactional.class.getName(), "grails.web.controllers.ControllerMethod", NotTransactional.class.getName()));
+    private static final Set<String> ANNOTATION_NAME_EXCLUDES = new HashSet<String>(Arrays.asList(PostConstruct.class.getName(), PreDestroy.class.getName(), Transactional.class.getName(), Rollback.class.getName(), "grails.web.controllers.ControllerMethod", NotTransactional.class.getName()));
 
     @Override
     void visit(ASTNode[] astNodes, SourceUnit source) {
@@ -104,8 +108,10 @@ class TransactionalTransform implements ASTTransformation{
         for (MethodNode md in methods) {
             String methodName = md.getName()
             int modifiers = md.modifiers
-            if (!md.isSynthetic() && !methodName.contains('$') && Modifier.isPublic(modifiers) && !Modifier.isAbstract(modifiers) && !Modifier.isStatic(modifiers)) {
+            if (!md.isSynthetic() && Modifier.isPublic(modifiers) && !Modifier.isAbstract(modifiers) && !Modifier.isStatic(modifiers)) {
                 if(hasExcludedAnnotation(md)) continue
+
+                if( methodName.contains('$') && !methodName.startsWith('$spock') ) continue
 
                 if(METHOD_NAME_EXCLUDES.contains(methodName)) continue
                 
@@ -267,6 +273,13 @@ class TransactionalTransform implements ASTTransformation{
                 GrailsArtefactClassInjector.EMPTY_CLASS_ARRAY,
                 methodNode.code
                 );
+
+        // GrailsCompileStatic and GrailsTypeChecked are not explicitly addressed
+        // here but they will be picked up because they are @AnnotationCollector annotations
+        // which use CompileStatic and TypeChecked...
+        renamedMethodNode.addAnnotations(methodNode.getAnnotations(COMPILE_STATIC_TYPE))
+        renamedMethodNode.addAnnotations(methodNode.getAnnotations(TYPE_CHECKED_TYPE))
+
         methodNode.setCode(null)
         classNode.addMethod(renamedMethodNode)
         
@@ -287,7 +300,45 @@ class TransactionalTransform implements ASTTransformation{
 
             //add the transactionManager property
             if (!GrailsASTUtils.hasProperty(declaringClassNode, PROPERTY_TRANSACTION_MANAGER)) {
-                declaringClassNode.addProperty(PROPERTY_TRANSACTION_MANAGER, Modifier.PUBLIC, ClassHelper.make(PlatformTransactionManager), null, null, null);
+
+                def transactionManagerClassNode = ClassHelper.make(PlatformTransactionManager)
+
+                def fieldName = '$' + PROPERTY_TRANSACTION_MANAGER
+                def field = declaringClassNode.addField(fieldName, Modifier.PROTECTED, transactionManagerClassNode, null)
+
+
+                def body = new BlockStatement()
+                def p = new Parameter(transactionManagerClassNode, PROPERTY_TRANSACTION_MANAGER)
+                def parameters = [p] as Parameter[]
+
+
+                def transactionManagerPropertyExpr = new PropertyExpression(new VariableExpression("this"), fieldName)
+                def getterBody = new BlockStatement()
+
+                // this is a hacky workaround that ensures the transaction manager is also set on the spock shared instance which seems to differ for
+                // some reason
+                if(GrailsASTUtils.isSubclassOf(declaringClassNode, "spock.lang.Specification")) {
+
+                    getterBody.addStatement(new ExpressionStatement(
+                            new MethodCallExpression(new PropertyExpression(new PropertyExpression(new VariableExpression("this"), "specificationContext"), "sharedInstance" ),
+                                    "setTransactionManager",
+                                    transactionManagerPropertyExpr)
+                    ))
+                }
+
+                getterBody.addStatement( new ReturnStatement(transactionManagerPropertyExpr))
+                declaringClassNode.addMethod("getTransactionManager", Modifier.PUBLIC, transactionManagerClassNode, GrailsASTUtils.ZERO_PARAMETERS, null, getterBody)
+
+                def assignment = Token.newSymbol("=", -1, -1)
+                body.addStatement(new ExpressionStatement(
+                        new BinaryExpression(transactionManagerPropertyExpr,
+                                assignment,
+                                             new VariableExpression(p)
+                )))
+
+
+                declaringClassNode.addMethod("setTransactionManager", Modifier.PUBLIC, ClassHelper.VOID_TYPE, parameters, null, body)
+
             }
 
         }

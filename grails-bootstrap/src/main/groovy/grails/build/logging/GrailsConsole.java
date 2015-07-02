@@ -22,14 +22,7 @@ import static org.fusesource.jansi.Ansi.Color.YELLOW;
 import static org.fusesource.jansi.Ansi.Erase.FORWARD;
 import grails.util.Environment;
 
-import java.io.File;
-import java.io.Flushable;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.io.PrintStream;
-import java.io.PrintWriter;
-import java.io.StringWriter;
+import java.io.*;
 import java.util.List;
 import java.util.Stack;
 
@@ -39,6 +32,7 @@ import jline.UnixTerminal;
 import jline.console.ConsoleReader;
 import jline.console.history.FileHistory;
 import jline.console.history.History;
+import jline.internal.Log;
 import jline.internal.ShutdownHooks;
 import jline.internal.TerminalLineSettings;
 
@@ -255,9 +249,17 @@ public class GrailsConsole implements ConsoleLogger {
     }
 
     protected ConsoleReader createConsoleReader(InputStream systemIn) throws IOException {
-        ConsoleReader consoleReader = new ConsoleReader(systemIn, out);
-        consoleReader.setExpandEvents(false);
-        return consoleReader;
+        // need to swap out the output to avoid logging during init
+        final PrintStream nullOutput = new PrintStream(new ByteArrayOutputStream());
+        final PrintStream originalOut = Log.getOutput();
+        try {
+            Log.setOutput(nullOutput);
+            ConsoleReader consoleReader = new ConsoleReader(systemIn, out);
+            consoleReader.setExpandEvents(false);
+            return consoleReader;
+        } finally {
+            Log.setOutput(originalOut);
+        }
     }
 
     /**
@@ -437,7 +439,7 @@ public class GrailsConsole implements ConsoleLogger {
     private void assertAllowInput() {
         assertAllowInput(null);
     }
-    
+
     private void assertAllowInput(String prompt) {
         if (reader == null) {
             String msg = "User input is not enabled, cannot obtain input stream";
@@ -1009,7 +1011,19 @@ public class GrailsConsole implements ConsoleLogger {
         System.setErr(originalSystemErr);
     }
 
+    public void cleanlyExit(int status) {
+        flush();
+        System.exit(status);
+    }
+
+    /**
+     * Makes sure that the console has been reset to the default state and that
+     * the out stream has been flushed.
+     */
     public void flush() {
+        if (isAnsiEnabled()) {
+            out.print(ansi().reset().toString());
+        }
         out.flush();
     }
 

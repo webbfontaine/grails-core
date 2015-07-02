@@ -48,10 +48,10 @@ class Support {
             if(grailsHome) {
                 def agentPath = System.getProperty(PROPERTY_RELOAD_AGENT_PATH)
                 if(!agentPath) {
-                    System.getenv(ENV_RELOAD_AGENT_PATH)
+                    agentPath = System.getenv(ENV_RELOAD_AGENT_PATH)
                 }
-                def file = agentPath ? new File(agentPath) : new File(grailsHome, "lib/org.springframework/springloaded/jars/springloaded-1.2.1.RELEASE.jar")
-                if(file.exists()) {
+                def file = findAgentJar(agentPath, grailsHome)
+                if(file?.exists()) {
                     def runtimeMxBean = ManagementFactory.runtimeMXBean
                     def arguments = runtimeMxBean.inputArguments
                     if(!arguments.contains('-Xverify:none') && !arguments.contains('-noverify')) {
@@ -68,6 +68,18 @@ class Support {
 
                     }
                 }
+            }
+        }
+    }
+
+    protected static File findAgentJar(String agentPath, String grailsHome) {
+        if(agentPath) {
+            return new File(agentPath)
+        }
+        else if(grailsHome) {
+            def parentDir = new File(grailsHome, "lib/org.springframework/springloaded/jars")
+            if(parentDir.exists()) {
+                return parentDir.listFiles()?.find() { File f -> f.name.endsWith('.RELEASE.jar')}
             }
         }
     }

@@ -12,6 +12,7 @@ import org.grails.config.CodeGenConfig
 import org.junit.Rule
 import org.junit.rules.TemporaryFolder
 import spock.lang.Ignore
+import spock.lang.IgnoreIf
 import spock.lang.Shared
 import spock.lang.Specification
 
@@ -21,8 +22,9 @@ import java.util.concurrent.TimeUnit
 import static net.sf.expectit.matcher.Matchers.anyString
 import static net.sf.expectit.matcher.Matchers.contains
 
+@IgnoreIf({ System.getenv('TRAVIS') })
 class GrailsCliSpec extends Specification {
-    static int EXPECT_TIMEOUT_SECONDS = (System.getenv('TRAVIS') == 'true' || System.getenv('BUILD_TAG')) ? 120 : 20
+    static int EXPECT_TIMEOUT_SECONDS = (System.getenv('TRAVIS') == 'true' || System.getenv('BUILD_TAG')) ? 180 : 20
 
     // we use a fixed profile repository revision so that the tests don't break after minor changes to the profile repository
     // set to empty string if you want to use most recent commit in the profile repository (for development)

@@ -16,26 +16,25 @@
 package org.grails.core.artefact;
 
 import grails.core.*;
+import grails.core.support.GrailsApplicationAware;
 import grails.persistence.Entity;
 import grails.util.Environment;
 import groovy.lang.Closure;
 import groovy.lang.GroovyObject;
-
-import java.io.IOException;
-import java.net.MalformedURLException;
-import java.net.URI;
-import java.net.URL;
-import java.security.CodeSource;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-
-import grails.core.support.GrailsApplicationAware;
 import org.codehaus.groovy.ast.ClassNode;
+import org.codehaus.groovy.ast.InnerClassNode;
+import org.grails.compiler.injection.GrailsASTUtils;
 import org.grails.core.DefaultGrailsDomainClass;
 import org.grails.core.support.GrailsDomainConfigurationUtil;
 import org.grails.io.support.GrailsResourceUtils;
 import org.grails.io.support.Resource;
 import org.grails.validation.ConstraintEvalUtils;
+
+import java.io.IOException;
+import java.lang.reflect.Modifier;
+import java.net.URL;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Evaluates the conventions that define a domain class in Grails.
@@ -46,6 +45,7 @@ import org.grails.validation.ConstraintEvalUtils;
 public class DomainClassArtefactHandler extends ArtefactHandlerAdapter implements GrailsApplicationAware {
 
     public static final String TYPE = "Domain";
+    public static final String PLUGIN_NAME = "domainClass";
 
     private Map<String, Object> defaultConstraints;
     public DomainClassArtefactHandler() {
@@ -60,6 +60,11 @@ public class DomainClassArtefactHandler extends ArtefactHandlerAdapter implement
     }
 
     @Override
+    public String getPluginName() {
+        return PLUGIN_NAME;
+    }
+
+    @Override
     @SuppressWarnings("rawtypes")
     public GrailsClass newArtefactClass(Class artefactClass) {
         return new DefaultGrailsDomainClass(artefactClass, defaultConstraints);
@@ -71,18 +76,19 @@ public class DomainClassArtefactHandler extends ArtefactHandlerAdapter implement
     }
 
     @Override
+    protected boolean isValidArtefactClassNode(ClassNode classNode, int modifiers) {
+        return !classNode.isEnum() && !(classNode instanceof InnerClassNode);
+    }
+
+
+    @Override
     public boolean isArtefact(ClassNode classNode) {
         if(classNode == null) return false;
         if(!isValidArtefactClassNode(classNode, classNode.getModifiers())) return false;
 
-        URI uri = classNode.getModule().getContext().getSource().getURI();
-
-        if(uri != null) {
-            try {
-                return GrailsResourceUtils.isDomainClass(uri.toURL());
-            } catch (MalformedURLException e) {
-                return super.isArtefact(classNode);
-            }
+        URL url = GrailsASTUtils.getSourceUrl(classNode);
+        if(url != null) {
+            return GrailsResourceUtils.isDomainClass(url);
         }
         else {
             return super.isArtefact(classNode);

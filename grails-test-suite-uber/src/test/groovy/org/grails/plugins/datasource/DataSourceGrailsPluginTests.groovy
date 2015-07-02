@@ -252,7 +252,7 @@ class DataSourceGrailsPluginTests extends AbstractGrailsMockTests {
                     username = "foo"
                     password = "blah"
               }
-              dataSource_ds2 {
+              ds2 {
                     driverClassName = "org.h2.Driver"
                     url = "jdbc:h2:mem:testDb2"
                     username = "user"
@@ -261,7 +261,7 @@ class DataSourceGrailsPluginTests extends AbstractGrailsMockTests {
                     dbCreate = "update"
                     readOnly = true
               }
-              dataSource_ds3 {
+              ds3 {
                     driverClassName = "org.h2.Driver"
                     url = "jdbc:h2:mem:testDb3"
                     username = "sa"
@@ -269,11 +269,11 @@ class DataSourceGrailsPluginTests extends AbstractGrailsMockTests {
                     dbCreate = "create-drop"
                     readOnly = true
               }
-              dataSource_ds4 {
+              ds4 {
                     driverClassName = "org.h2.Driver"
                     url = "jdbc:h2:mem:testDb4"
               }
-              dataSource_jndi {
+              jndi {
                     jndiName = "java:comp/env/myDataSource"
               }
             }
@@ -379,7 +379,7 @@ class DataSourceGrailsPluginTests extends AbstractGrailsMockTests {
                     username = "sa"
                     password = ""
               }
-              dataSource_ds2 {
+              ds2 {
                     pooled = true
                     driverClassName = "org.h2.Driver"
                     url = "jdbc:h2:tcp://localhost:1234/~/test"

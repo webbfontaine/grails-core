@@ -1,17 +1,8 @@
 apply plugin: 'groovy'
-apply plugin: 'maven'
-
-group = 'org.grails'
-
-repositories {
-  maven { url "http://repo.spring.io/libs-release" }
-  mavenLocal()
-  mavenCentral()
-
-}
 
 dependencies {
     compile gradleApi()
+    compile project(":grails-gradle-model")
     compile project(":grails-bootstrap"), {
         exclude group:"org.fusesource.jansi", module:"jansi"
         exclude group:"jline", module:"jline"
@@ -29,4 +20,6 @@ dependencies {
     }
 
     compile "org.springframework.boot:spring-boot-gradle-plugin:$springBootVersion"
+
+    compile 'com.netflix.nebula:gradle-extra-configurations-plugin:2.2.0'
 }

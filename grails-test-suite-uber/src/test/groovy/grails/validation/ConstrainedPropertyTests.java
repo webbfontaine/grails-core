@@ -2,10 +2,17 @@ package grails.validation;
 
 import grails.core.GrailsDomainClass;
 import grails.util.Holders;
+import grails.validation.exceptions.ConstraintException;
 import groovy.lang.GroovyClassLoader;
 import groovy.lang.GroovyObject;
 import groovy.lang.IntRange;
 import groovy.lang.ObjectRange;
+import junit.framework.TestCase;
+import org.grails.core.DefaultGrailsDomainClass;
+import org.grails.plugins.MockGrailsPluginManager;
+import org.grails.test.support.MockHibernatePluginHelper;
+import org.springframework.validation.BindException;
+import org.springframework.validation.Errors;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -13,14 +20,6 @@ import java.util.Collection;
 import java.util.Date;
 import java.util.Iterator;
 import java.util.Map;
-
-import junit.framework.TestCase;
-
-import org.grails.test.support.MockHibernatePluginHelper;
-import org.grails.core.DefaultGrailsDomainClass;
-import org.grails.plugins.MockGrailsPluginManager;
-import org.springframework.validation.BindException;
-import org.springframework.validation.Errors;
 
 public class ConstrainedPropertyTests extends TestCase {
 
@@ -54,6 +53,7 @@ public class ConstrainedPropertyTests extends TestCase {
 
         assertTrue("should be an url", cp.isUrl());
     }
+
     public void testGetSetEmail() {
         ConstrainedProperty cp = new ConstrainedProperty(ConstrainedPropertyTests.class,"testProperty", String.class);
         cp.setEmail(true);
